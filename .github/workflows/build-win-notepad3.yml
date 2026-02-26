@@ -40,9 +40,12 @@ jobs:
         uses: nuget/setup-nuget@main
  
       - name: Restore nuget packages
-        run: nuget restore Notepad3.sln -Verbosity detailed
+        working-directory: ./notepad3_source
+        run: |
+          nuget restore Notepad3.sln -Verbosity detailed
  
       - name: Generate version
+        working-directory: ./notepad3_source
         shell: pwsh
         run: |
           $env:GITHUB_ACTIONS_BUILD = "true"
@@ -114,7 +117,8 @@ jobs:
  
       - name: Install autohotkey
         if: matrix.platform == 'Win32' || matrix.platform == 'x64'
-        run: choco install autohotkey.install --no-progress -y
+        run: |
+          choco install autohotkey.install --no-progress -y
  
       - name: Run tests
         if: matrix.platform == 'Win32' || matrix.platform == 'x64'

@@ -135,4 +135,4 @@ jobs:
             !Bin/**/*.ipdb
             !Bin/**/*.lib
             !Bin/**/*.exp
-          retention-days: 30
+          retention-days: 1

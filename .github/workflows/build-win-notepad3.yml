@@ -128,11 +128,12 @@ jobs:
         with:
           name: Notepad3-${{ matrix.platform }}-${{ matrix.configuration }}
           path: |
-            Bin/**/*
-            !Bin/**/obj/**
-            !Bin/**/*.pdb
-            !Bin/**/*.iobj
-            !Bin/**/*.ipdb
-            !Bin/**/*.lib
-            !Bin/**/*.exp
+            ./notepad3_source/Bin/**/*
+            !./notepad3_source/Bin/**/obj/**
+            !./notepad3_source/Bin/**/*.pdb
+            !./notepad3_source/Bin/**/*.iobj
+            !./notepad3_source/Bin/**/*.ipdb
+            !./notepad3_source/Bin/**/*.lib
+            !./notepad3_source/Bin/**/*.exp
           retention-days: 1
+ 

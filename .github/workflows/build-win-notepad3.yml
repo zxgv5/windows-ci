@@ -135,5 +135,5 @@ jobs:
         uses: ./ci_source/.github/actions/aes256pac_release/
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
-          BUILD_ARTIFACT_PATH: "./dist/notepad3-${{ env.BUILD_DATE }}.apk"
+          BUILD_ARTIFACT_PATH: "./dist/notepad3-${{ env.BUILD_DATE }}.zip"
           RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-notepad3"

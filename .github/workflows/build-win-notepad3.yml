@@ -6,7 +6,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
     strategy:
       fail-fast: false
       matrix:
@@ -22,17 +21,17 @@ jobs:
           path: notepad3_source
           fetch-depth: 0
           submodules: recursive
-
+ 
       - name: Checkout ci source repo (self)
         uses: actions/checkout@main
         with:
           path: ci_source
-
+ 
       - name: Initialization values
         shell: bash
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
-
+ 
       - name: Setup msbuild
         uses: microsoft/setup-msbuild@main
  
@@ -50,13 +49,11 @@ jobs:
         run: |
           $env:GITHUB_ACTIONS_BUILD = "true"
           $CommitID = (git rev-parse --short=8 HEAD)
-          
           # Create VersionEx.h with proper values
           $Major = 6
           $Minor = [int]$(Get-Date -format yy)
           $Revis = [int]$(Get-Date -format Mdd)
           $Build = ${{ github.run_number }}
-          
           $SciVer = Get-Content "scintilla\version.txt" -ErrorAction SilentlyContinue
           if (!$SciVer) { $SciVer = "0" }
           $LxiVer = Get-Content "lexilla\version.txt" -ErrorAction SilentlyContinue
@@ -69,7 +66,6 @@ jobs:
           if (!$TinyExprVer) { $TinyExprVer = "0.0.0" }
           $UtHashVer = Get-Content "src\uthash\version.txt" -ErrorAction SilentlyContinue
           if (!$UtHashVer) { $UtHashVer = "0.0.0" }
-          
           Copy-Item -LiteralPath "Versions\VersionEx.h.tpl" -Destination "src\VersionEx.h" -Force
           $content = Get-Content "src\VersionEx.h" -Raw
           $content = $content -replace '\$APPNAME\$', "Notepad3"
@@ -86,7 +82,6 @@ jobs:
           $content = $content -replace '\$VERPATCH\$', ""
           $content = $content -replace '\$COMMITID\$', "$CommitID"
           Set-Content -Path "src\VersionEx.h" -Value $content -NoNewline
-          
           $ConfManifest = "res\Notepad3.exe.conf.manifest"
           Copy-Item -LiteralPath "Versions\Notepad3.exe.manifest.tpl" -Destination $ConfManifest -Force
           $content = Get-Content $ConfManifest -Raw
@@ -94,10 +89,8 @@ jobs:
           $content = $content -replace '\$VERPATCH\$', ""
           $content = $content -replace '\$VERSION\$', "$Major.$Minor.$Revis.$Build"
           Set-Content -Path $ConfManifest -Value $content -NoNewline
-          
           # Persist build number for TestFileVersion.cmd
           $Build | Set-Content -Path "Versions\build.txt" -NoNewline
- 
           Write-Host "Version: $Major.$Minor.$Revis.$Build ($CommitID)"
  
       - name: Build app
@@ -106,25 +99,37 @@ jobs:
         run: |
           $platform = "${{ matrix.platform }}"
           $config = "${{ matrix.configuration }}"
-          
           # Handle x64_AVX2 - use native Release_AVX2 configuration
           if ($platform -eq "x64_AVX2") {
             $platform = "x64"
             $config = "${{ matrix.configuration }}_AVX2"
           }
-          
           msbuild Notepad3.sln /m /p:Configuration=$config /p:Platform=$platform /v:minimal
-  
-      - name: Upload artifacts
-        uses: actions/upload-artifact@main
+
+      - name: Create zip archive locally
+        working-directory: ./notepad3_source
+        shell: pwsh
+        run: |
+          $zipName = "../dist/notepad3-${{ env.BUILD_DATE }}.zip"
+          $source = "./bin"
+          $tempDir = "./temp_zip_dir"
+          New-Item -ItemType Directory -Path "../dist" -Force | Out-Null
+          if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+          # 使用 robocopy 复制文件，排除 obj 目录和指定扩展名文件
+          robocopy $source $tempDir /S /XD obj /XF *.pdb *.iobj *.ipdb *.lib *.exp
+          if ($LASTEXITCODE -ge 8) {
+              throw "robocopy failed with exit code $LASTEXITCODE"
+          }
+          # 将临时目录内容压缩为 zip
+          Compress-Archive -Path "$tempDir/*" -DestinationPath $zipName -CompressionLevel Optimal -Force
+          # 清理临时目录
+          Remove-Item -Recurse -Force $tempDir
+          Write-Host "zip archive created: $zipName"
+ 
+      - name: Encrypt package and create release
+        uses: ./ci_source/.github/actions/aes256pac_release/
         with:
-          name: Notepad3-${{ matrix.platform }}-${{ matrix.configuration }}
-          path: |
-            ./notepad3_source/Bin/**/*
-            !./notepad3_source/Bin/**/obj/**
-            !./notepad3_source/Bin/**/*.pdb
-            !./notepad3_source/Bin/**/*.iobj
-            !./notepad3_source/Bin/**/*.ipdb
-            !./notepad3_source/Bin/**/*.lib
-            !./notepad3_source/Bin/**/*.exp
-          retention-days: 1
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          BUILD_ARTIFACT_PATH: "./dist/notepad3-${{ env.BUILD_DATE }}.apk"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-notepad3"

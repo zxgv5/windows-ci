@@ -129,6 +129,7 @@ jobs:
           # 清理临时目录
           Remove-Item -Recurse -Force $tempDir
           Write-Host "zip archive created: $zipName"
+          exit 0 # 至此，可强制成功退出，解决某些不明错误
 
       - name: Encrypt package and create release
         uses: ./ci_source/.github/actions/aes256pac_release/

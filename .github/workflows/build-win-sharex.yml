@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Checkout ci source repo (self)
+      - name: Checkout ci source repo
         uses: actions/checkout@main
         with:
           path: ci_source
@@ -35,7 +35,7 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - name: Download api keys (optional)
+      - name: Download api keys
         working-directory: ./sharex_source
         env:
           API_KEYS: ${{ secrets.API_KEYS }}
@@ -81,10 +81,9 @@ jobs:
           # 清理临时目录
           Remove-Item -Recurse -Force $tempDir
           Write-Host "zip archive created: $zipName"
-          exit 0   # 强制成功
+          exit 0   # 强制成功，忽略任何非零退出码
 
       - name: Encrypt package and create release
-        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
         uses: ./ci_source/.github/actions/aes256pac_release/
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}

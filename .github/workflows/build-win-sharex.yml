@@ -1,0 +1,91 @@
+name: build-win-sharex
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@main
+        with:
+          repository: ShareX/ShareX
+          ref: develop
+          path: sharex_source
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Checkout ci source repo (self)
+        uses: actions/checkout@main
+        with:
+          path: ci_source
+
+      - name: Initialization values
+        shell: bash
+        run: |
+          echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+
+      - name: Setup .net
+        uses: actions/setup-dotnet@main
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download api keys (optional)
+        working-directory: ./sharex_source
+        env:
+          API_KEYS: ${{ secrets.API_KEYS }}
+        if: env.API_KEYS != ''
+        run: |
+          Invoke-WebRequest -Uri "$env:API_KEYS" -OutFile "ShareX.UploadersLib/APIKeys/APIKeysLocal.cs"
+
+      - name: Restore nuget packages
+        working-directory: ./sharex_source
+        run: |
+          dotnet restore --runtime win-x64 ShareX.sln
+
+      - name: Build app
+        working-directory: ./sharex_source
+        run: |
+          dotnet build --no-restore --configuration Release -p:Platform=x64 --self-contained true /m:1 ShareX.sln
+
+      - name: Run setup to generate outputs
+        working-directory: ./sharex_source
+        run: |
+          & "ShareX.Setup/bin/Release/win-x64/ShareX.Setup.exe" -silent -job Release -platform x64
+
+      - name: Create zip archive locally
+        working-directory: ./sharex_source
+        shell: pwsh
+        run: |
+          $zipName = "../dist/sharex-${{ env.BUILD_DATE }}.zip"
+          $source = "./Output"
+          $tempDir = "./temp_zip_dir"
+          # 确保目标目录存在
+          New-Item -ItemType Directory -Path "../dist" -Force | Out-Null
+          # 清理并创建临时目录
+          if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+          # 复制 Output 目录中所有文件（排除不需要的类型）
+          robocopy $source $tempDir /S /XF *.pdb *.iobj *.ipdb *.lib *.exp
+          # robocopy 返回码 0-7 表示成功，≥8 表示错误
+          if ($LASTEXITCODE -ge 8) {
+              throw "robocopy failed with exit code $LASTEXITCODE"
+          }
+          # 压缩临时目录
+          Compress-Archive -Path "$tempDir/*" -DestinationPath $zipName -CompressionLevel Optimal -Force
+          # 清理临时目录
+          Remove-Item -Recurse -Force $tempDir
+          Write-Host "zip archive created: $zipName"
+
+      - name: Encrypt package and create release
+        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
+        uses: ./ci_source/.github/actions/aes256pac_release/
+        with:
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          BUILD_ARTIFACT_PATH: "./dist/sharex-${{ env.BUILD_DATE }}.zip"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-sharex"

@@ -46,7 +46,7 @@ jobs:
       - name: Restore nuget packages
         working-directory: ./sharex_source
         run: |
-          dotnet restore --runtime win-x64 ShareX.sln
+          dotnet restore ShareX.sln -p:Configuration=Release -p:Platform=x64 --runtime win-x64
 
       - name: Build app
         working-directory: ./sharex_source
@@ -65,20 +65,12 @@ jobs:
           $zipName = "../dist/sharex-${{ env.BUILD_DATE }}.zip"
           $source = "./Output"
           $tempDir = "./temp_zip_dir"
-          # 确保目标目录存在
           New-Item -ItemType Directory -Path "../dist" -Force | Out-Null
-          # 清理并创建临时目录
           if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
           New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-          # 复制 Output 目录中所有文件（排除不需要的类型）
           robocopy $source $tempDir /S /XF *.pdb *.iobj *.ipdb *.lib *.exp
-          # robocopy 返回码 0-7 表示成功，≥8 表示错误
-          if ($LASTEXITCODE -ge 8) {
-              throw "robocopy failed with exit code $LASTEXITCODE"
-          }
-          # 压缩临时目录
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
           Compress-Archive -Path "$tempDir/*" -DestinationPath $zipName -CompressionLevel Optimal -Force
-          # 清理临时目录
           Remove-Item -Recurse -Force $tempDir
           Write-Host "zip archive created: $zipName"
 

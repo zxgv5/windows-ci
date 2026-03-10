@@ -71,7 +71,8 @@ jobs:
           if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
           New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
           # 复制 Output 目录中所有文件（排除不需要的类型）
-          robocopy $source $tempDir /S /XF *.pdb *.iobj *.ipdb *.lib *.exp
+          # robocopy $source $tempDir /S /XF *.pdb *.iobj *.ipdb *.lib *.exp
+          robocopy $source $tempDir *-portable-x64.zip /S
           # robocopy 返回码 0-7 表示成功，≥8 表示错误
           if ($LASTEXITCODE -ge 8) {
               throw "robocopy failed with exit code $LASTEXITCODE"

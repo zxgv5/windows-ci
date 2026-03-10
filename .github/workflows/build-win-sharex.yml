@@ -81,7 +81,7 @@ jobs:
           # 清理临时目录
           Remove-Item -Recurse -Force $tempDir
           Write-Host "zip archive created: $zipName"
-          # exit 0   # 强制成功退出，忽略任何非零退出码
+          exit 0   # 强制成功
 
       - name: Encrypt package and create release
         if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')

@@ -59,14 +59,40 @@ jobs:
       - name: Verify jom installation
         shell: pwsh
         run: |
-          $jomPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom.exe"
+          $jomPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom\jom.exe"
           if (Test-Path $jomPath) {
             Write-Host "jom.exe found at $jomPath"
           } else {
-            Write-Host "jom.exe NOT found!"
+            Write-Host "jom.exe NOT found at $jomPath!"
             Get-ChildItem "${{ github.workspace }}\taskexplorer_source\Qt\Tools" -Recurse -Filter jom.exe -ErrorAction SilentlyContinue
             exit 1
           }
+
+      - name: Check required submodules
+        shell: pwsh
+        working-directory: ./taskexplorer_source
+        run: |
+          Write-Host "Checking required directories..."
+          $requiredDirs = @(
+            "QtSingleApp/qtsingleapp/qtsingleapp",
+            "qtservice/qtservice/qtservice",
+            "qwt/qwt",
+            "qhexedit/src",
+            "qextwidgets",
+            "MiscHelpers",
+            "TaskExplorer"
+          )
+          foreach ($dir in $requiredDirs) {
+            $fullPath = Join-Path (Get-Location) $dir
+            if (Test-Path $fullPath) {
+              Write-Host "OK: $fullPath exists"
+            } else {
+              Write-Host "MISSING: $fullPath does not exist!"
+              Get-ChildItem (Split-Path $fullPath -Parent) -ErrorAction SilentlyContinue
+            }
+          }
+          Write-Host "All .pro files found:"
+          Get-ChildItem -Recurse -Filter *.pro | ForEach-Object { Write-Host $_.FullName }
 
       - name: Build app (with manual debug)
         shell: cmd
@@ -74,22 +100,23 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\${{ env.VS_VERSION }}\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           call prepTools.cmd x64
-          echo "qt_path=%qt_path%"
-          echo "jom_path=%jom_path%"
-          echo "Manually building qtsingleapp to debug..."
-          mkdir Build_qtsingleapp_x64
-          cd Build_qtsingleapp_x64
-          "%qt_path%\bin\qmake.exe" "..\..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro"
+          echo qt_path=%qt_path%
+          echo jom_path=%jom_path%
+          echo "Attempting manual build of qtsingleapp via buildModule.cmd:"
+          call buildModule.cmd qtsingleapp "%~dp0..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro"
           if errorlevel 1 (
-            echo "qmake failed"
+            echo "buildModule.cmd failed. Checking build directory:"
+            if exist Build_qtsingleapp_x64 (
+              dir Build_qtsingleapp_x64
+              if exist Build_qtsingleapp_x64\Makefile.Release (
+                echo "Contents of Makefile.Release:"
+                type Build_qtsingleapp_x64\Makefile.Release
+              )
+            ) else (
+              echo "Build directory Build_qtsingleapp_x64 not created."
+            )
             exit /b 1
           )
-          "%jom_path%\jom.exe" -f Makefile.Release -j 8
-          if errorlevel 1 (
-            echo "jom failed"
-            exit /b 1
-          )
-          cd ..
           echo "Manual build succeeded, now running full buildRelease.cmd"
           buildRelease.cmd x64
 

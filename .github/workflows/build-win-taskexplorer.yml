@@ -6,7 +6,7 @@ on:
 
 env:
   QT_VERSION: '5.15.2'
-  VS_VERSION: '2022'                 # 与 windows-latest 默认的 VS 版本一致
+  VS_VERSION: '2022'
 
 permissions:
   contents: write
@@ -39,16 +39,24 @@ jobs:
         shell: pwsh
         run: |
           pip install aqtinstall
-          # 安装 Qt 库（包含 qtcharts 和 qtscript 模块）
           aqt install-qt --outputdir "${{ github.workspace }}\taskexplorer_source\Qt" `
             windows desktop "${{ env.QT_VERSION }}" "win64_msvc${{ env.VS_VERSION }}_64" `
             --modules qtcharts qtscript
-          # 安装 Qt Creator 工具（内含 jom.exe）
           aqt install-tool --outputdir "${{ github.workspace }}\taskexplorer_source\Qt" `
             windows desktop tools_qtcreator
-          # 将 Qt bin 目录加入 PATH，供后续步骤使用
           echo "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc${{ env.VS_VERSION }}_64\bin" `
             | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Patch build scripts
+        shell: pwsh
+        working-directory: ./taskexplorer_source
+        run: |
+          $oldString = 'msvc2019_64'
+          $newString = "msvc${{ env.VS_VERSION }}_64"
+          Get-ChildItem -Recurse -Include *.cmd,*.pro,*.pri | ForEach-Object {
+            (Get-Content $_.FullName) -replace $oldString, $newString | Set-Content $_.FullName
+          }
+          Write-Host "Patched build scripts to use $newString"
 
       - name: Build app
         shell: cmd

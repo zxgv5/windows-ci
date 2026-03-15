@@ -102,8 +102,16 @@ jobs:
           call prepTools.cmd x64
           echo qt_path=%qt_path%
           echo jom_path=%jom_path%
-
           echo Current directory: %cd%
+
+          :: Use absolute path for jom.exe (verified in previous step)
+          set JOM_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\Qt\Tools\QtCreator\bin\jom\jom.exe
+          echo Checking jom.exe at %JOM_ABS%
+          if not exist "%JOM_ABS%" (
+            echo ERROR: jom.exe not found at %JOM_ABS%
+            dir "%GITHUB_WORKSPACE%\taskexplorer_source\Qt\Tools\QtCreator\bin\jom"
+            exit /b 1
+          )
 
           set PRO_FILE=..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
           echo Checking pro file: %PRO_FILE%
@@ -111,12 +119,6 @@ jobs:
             echo ERROR: pro file not found: %PRO_FILE%
             echo Listing parent QtSingleApp directory:
             dir ..\QtSingleApp\qtsingleapp\qtsingleapp
-            exit /b 1
-          )
-
-          if not exist "%jom_path%\jom.exe" (
-            echo ERROR: jom.exe not found at %jom_path%\jom.exe
-            dir "%jom_path%"
             exit /b 1
           )
 
@@ -128,8 +130,8 @@ jobs:
             echo qmake failed
             exit /b 1
           )
-          echo qmake succeeded, now running jom...
-          "%jom_path%\jom.exe" -f Makefile.Release -j 8
+          echo qmake succeeded, now running jom using absolute path...
+          "%JOM_ABS%" -f Makefile.Release -j 8
           if errorlevel 1 (
             echo jom failed
             exit /b 1

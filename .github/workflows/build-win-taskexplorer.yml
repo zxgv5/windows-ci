@@ -30,11 +30,6 @@ jobs:
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
 
-      - name: Setup msvc
-        uses: ilammy/msvc-dev-cmd@master
-        with:
-          arch: x64
-
       - name: Setup qt
         uses: jurplel/install-qt-action@master
         with:
@@ -43,8 +38,18 @@ jobs:
           modules: 'qtcharts qtscript qtsvg qttools'
 
       - name: Build app
+        shell: cmd
         working-directory: ./taskexplorer_source/Build
-        run: ./buildRelease.cmd x64
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          buildRelease.cmd x64
+
+      - name: List generated files
+        working-directory: ./taskexplorer_source
+        shell: bash
+        run: |
+          echo "Listing all apk files generated:"
+          find ./bin/x64/Release "*.*" | sort
 
       - name: Create zip archive locally
         working-directory: ./taskexplorer_source

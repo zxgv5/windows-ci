@@ -48,8 +48,15 @@ jobs:
         working-directory: ./taskexplorer_source
         shell: bash
         run: |
-          echo "Listing all apk files generated:"
-          find ./bin/x64/Release "*.*" | sort
+          echo "Listing all generated files:"
+          find ./bin/x64/Release -type f | sort
+
+      # 调试步骤：检查 ci_source 中的 action 是否存在
+      - name: Debug list ci_source actions
+        shell: bash
+        run: |
+          echo "Content of ci_source/.github/actions:"
+          ls -R ./ci_source/.github/actions || echo "Directory not found"
 
       - name: Create zip archive locally
         working-directory: ./taskexplorer_source
@@ -71,7 +78,8 @@ jobs:
           exit 0
 
       - name: Encrypt package and create release
-        uses: ./ci_source/.github/actions/aes256pac_release/
+        # 移除末尾斜杠，避免路径解析问题
+        uses: ./ci_source/.github/actions/aes256pac_release
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
           BUILD_ARTIFACT_PATH: "./dist/taskexplorer-${{ env.BUILD_DATE }}.zip"

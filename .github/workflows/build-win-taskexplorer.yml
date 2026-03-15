@@ -102,22 +102,40 @@ jobs:
           call prepTools.cmd x64
           echo qt_path=%qt_path%
           echo jom_path=%jom_path%
-          echo "Attempting manual build of qtsingleapp via buildModule.cmd:"
-          call buildModule.cmd qtsingleapp "%~dp0..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro"
-          if errorlevel 1 (
-            echo "buildModule.cmd failed. Checking build directory:"
-            if exist Build_qtsingleapp_x64 (
-              dir Build_qtsingleapp_x64
-              if exist Build_qtsingleapp_x64\Makefile.Release (
-                echo "Contents of Makefile.Release:"
-                type Build_qtsingleapp_x64\Makefile.Release
-              )
-            ) else (
-              echo "Build directory Build_qtsingleapp_x64 not created."
-            )
+
+          REM Verify pro file exists
+          set PRO_FILE=%~dp0..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
+          echo Checking pro file: %PRO_FILE%
+          if not exist "%PRO_FILE%" (
+            echo ERROR: pro file not found: %PRO_FILE%
+            dir "%~dp0..\QtSingleApp\qtsingleapp\qtsingleapp"
             exit /b 1
           )
-          echo "Manual build succeeded, now running full buildRelease.cmd"
+
+          REM Verify jom executable
+          if not exist "%jom_path%\jom.exe" (
+            echo ERROR: jom.exe not found at %jom_path%\jom.exe
+            dir "%jom_path%"
+            exit /b 1
+          )
+
+          REM Try to run qmake manually with debug output
+          mkdir Build_qtsingleapp_x64
+          cd Build_qtsingleapp_x64
+          echo Running qmake with debug: "%qt_path%\bin\qmake.exe" "%PRO_FILE%" -d
+          "%qt_path%\bin\qmake.exe" "%PRO_FILE%" -d
+          if errorlevel 1 (
+            echo qmake failed
+            exit /b 1
+          )
+          echo qmake succeeded, now running jom...
+          "%jom_path%\jom.exe" -f Makefile.Release -j 8
+          if errorlevel 1 (
+            echo jom failed
+            exit /b 1
+          )
+          cd ..
+          echo Manual build succeeded, now running full buildRelease.cmd
           buildRelease.cmd x64
 
       - name: Create zip archive locally

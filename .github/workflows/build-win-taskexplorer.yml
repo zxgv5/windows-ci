@@ -1,0 +1,73 @@
+name: build-win-taskexplorer
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@main
+        with:
+          repository: DavidXanatos/TaskExplorer
+          ref: master
+          path: taskexplorer_source
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Checkout ci source repo
+        uses: actions/checkout@main
+        with:
+          path: ci_source
+
+      - name: Generate timestamp
+        shell: bash
+        run: |
+          echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+
+      - name: Setup msvc
+        uses: ilammy/msvc-dev-cmd@master
+        with:
+          arch: x64
+
+      - name: Setup qt
+        uses: jurplel/install-qt-action@master
+        with:
+          version: '5.15.2'
+          arch: win64_msvc2019_64
+          modules: 'qtcharts qtscript qtsvg qttools'
+
+      - name: Build app
+        working-directory: ./taskexplorer_source/Build
+        run: ./buildRelease.cmd x64
+
+      - name: Create zip archive locally
+        working-directory: ./taskexplorer_source
+        shell: pwsh
+        run: |
+          $zipName = "../dist/taskexplorer-${{ env.BUILD_DATE }}.zip"
+          $source = "./bin/x64/Release"
+          $tempDir = "./temp_zip_dir"
+          New-Item -ItemType Directory -Path "../dist" -Force | Out-Null
+          if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+          robocopy $source $tempDir * /S
+          if ($LASTEXITCODE -ge 8) {
+              throw "robocopy failed with exit code $LASTEXITCODE"
+          }
+          Compress-Archive -Path "$tempDir/*" -DestinationPath $zipName -CompressionLevel Optimal -Force
+          Remove-Item -Recurse -Force $tempDir
+          Write-Host "zip archive created: $zipName"
+          exit 0
+
+      - name: Encrypt package and create release
+        uses: ./ci_source/.github/actions/aes256pac_release/
+        with:
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          BUILD_ARTIFACT_PATH: "./dist/taskexplorer-${{ env.BUILD_DATE }}.zip"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-taskexplorer"

@@ -34,20 +34,35 @@ jobs:
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
 
-      # 安装 Qt 5.15.2 使用 MSVC2019 架构（与脚本默认一致）
+      # 安装 Qt 5.15.2 基础库（不安装附加模块，避免模块缺失导致安装不完整）
       - name: Install qt
         shell: pwsh
         run: |
           pip install aqtinstall
+          # 安装 Qt 基础库（默认包含 qtbase 等必要组件）
           aqt install-qt --outputdir "${{ github.workspace }}\taskexplorer_source\Qt" `
-            windows desktop "${{ env.QT_VERSION }}" win64_msvc2019_64 `
-            --modules qtcharts qtscript
+            windows desktop "${{ env.QT_VERSION }}" win64_msvc2019_64
+          # 安装 Qt Creator 工具（内含 jom.exe）
           aqt install-tool --outputdir "${{ github.workspace }}\taskexplorer_source\Qt" `
             windows desktop tools_qtcreator
+          # 将 Qt bin 目录加入 PATH
           echo "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\bin" `
             | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # 不再需要 patch 步骤，脚本中的 msvc2019_64 路径与安装目录一致
+      # 验证 Qt 安装是否成功（确保 qmake.exe 存在）
+      - name: Verify qt installation
+        shell: pwsh
+        run: |
+          $qtBin = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\bin"
+          Write-Host "Checking qmake.exe in $qtBin"
+          if (Test-Path "$qtBin\qmake.exe") {
+            Write-Host "qmake.exe found"
+          } else {
+            Write-Host "qmake.exe NOT found! Listing directory:"
+            Get-ChildItem $qtBin -ErrorAction SilentlyContinue
+            exit 1
+          }
+
       - name: Build app
         shell: cmd
         working-directory: ./taskexplorer_source/Build

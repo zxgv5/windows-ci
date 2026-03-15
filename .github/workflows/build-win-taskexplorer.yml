@@ -103,23 +103,23 @@ jobs:
           echo qt_path=%qt_path%
           echo jom_path=%jom_path%
 
-          REM Verify pro file exists
-          set PRO_FILE=%~dp0..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
+          echo Current directory: %cd%
+
+          set PRO_FILE=..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
           echo Checking pro file: %PRO_FILE%
           if not exist "%PRO_FILE%" (
             echo ERROR: pro file not found: %PRO_FILE%
-            dir "%~dp0..\QtSingleApp\qtsingleapp\qtsingleapp"
+            echo Listing parent QtSingleApp directory:
+            dir ..\QtSingleApp\qtsingleapp\qtsingleapp
             exit /b 1
           )
 
-          REM Verify jom executable
           if not exist "%jom_path%\jom.exe" (
             echo ERROR: jom.exe not found at %jom_path%\jom.exe
             dir "%jom_path%"
             exit /b 1
           )
 
-          REM Try to run qmake manually with debug output
           mkdir Build_qtsingleapp_x64
           cd Build_qtsingleapp_x64
           echo Running qmake with debug: "%qt_path%\bin\qmake.exe" "%PRO_FILE%" -d

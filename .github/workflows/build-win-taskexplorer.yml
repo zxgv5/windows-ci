@@ -30,12 +30,13 @@ jobs:
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
 
-      - name: Setup qt
-        uses: jurplel/install-qt-action@master
-        with:
-          version: '5.15.2'
-          arch: win64_msvc2019_64
-          modules: 'qtcharts qtscript qtsvg qttools'
+      # 手动安装 Qt 5.15.2 (不使用第三方 action)
+      - name: Install qt
+        shell: pwsh
+        run: |
+          pip install aqtinstall
+          aqt install-qt --outputdir ${{ runner.temp }}\Qt windows desktop 5.15.2 win64_msvc2026_64 --modules qtcharts qtscript qtsvg qttools
+          echo "${{ runner.temp }}\Qt\5.15.2\msvc2026_64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build app
         shell: cmd
@@ -43,20 +44,6 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           buildRelease.cmd x64
-
-      - name: List generated files
-        working-directory: ./taskexplorer_source
-        shell: bash
-        run: |
-          echo "Listing all generated files:"
-          find ./bin/x64/Release -type f | sort
-
-      # 调试步骤：检查 ci_source 中的 action 是否存在
-      - name: Debug list ci_source actions
-        shell: bash
-        run: |
-          echo "Content of ci_source/.github/actions:"
-          ls -R ./ci_source/.github/actions || echo "Directory not found"
 
       - name: Create zip archive locally
         working-directory: ./taskexplorer_source
@@ -78,7 +65,6 @@ jobs:
           exit 0
 
       - name: Encrypt package and create release
-        # 移除末尾斜杠，避免路径解析问题
         uses: ./ci_source/.github/actions/aes256pac_release
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}

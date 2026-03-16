@@ -94,59 +94,55 @@ jobs:
           Write-Host "All .pro files found:"
           Get-ChildItem -Recurse -Filter *.pro | ForEach-Object { Write-Host $_.FullName }
 
-      - name: Build app (with manual debug)
+      - name: Manual build of first module (to verify)
         shell: cmd
         working-directory: ./taskexplorer_source/Build
         run: |
           call "C:\Program Files\Microsoft Visual Studio\${{ env.VS_VERSION }}\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           call prepTools.cmd x64
-          echo qt_path=%qt_path%
-          echo jom_path=%jom_path%
-          echo Current directory: %cd%
-
-          :: Use absolute path for qmake
           set QMAKE_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\Qt\%QT_VERSION%\msvc2019_64\bin\qmake.exe
-          echo Checking qmake.exe at %QMAKE_ABS%
-          if not exist "%QMAKE_ABS%" (
-            echo ERROR: qmake.exe not found at %QMAKE_ABS%
-            dir "%GITHUB_WORKSPACE%\taskexplorer_source\Qt\%QT_VERSION%\msvc2019_64\bin"
-            exit /b 1
-          )
-
-          :: Use absolute path for jom
           set JOM_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\Qt\Tools\QtCreator\bin\jom\jom.exe
-          echo Checking jom.exe at %JOM_ABS%
-          if not exist "%JOM_ABS%" (
-            echo ERROR: jom.exe not found at %JOM_ABS%
-            dir "%GITHUB_WORKSPACE%\taskexplorer_source\Qt\Tools\QtCreator\bin\jom"
-            exit /b 1
-          )
-
-          :: Use absolute path for pro file
           set PRO_FILE_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
-          echo Checking pro file at %PRO_FILE_ABS%
-          if not exist "%PRO_FILE_ABS%" (
-            echo ERROR: pro file not found at absolute path
-            dir "%GITHUB_WORKSPACE%\taskexplorer_source\QtSingleApp\qtsingleapp\qtsingleapp"
-            exit /b 1
-          )
-
           mkdir Build_qtsingleapp_x64
           cd Build_qtsingleapp_x64
-          echo Running qmake with debug: "%QMAKE_ABS%" "%PRO_FILE_ABS%" -d
           "%QMAKE_ABS%" "%PRO_FILE_ABS%" -d
-          if errorlevel 1 (
-            echo qmake failed
-            exit /b 1
-          )
-          echo qmake succeeded, now running jom...
           "%JOM_ABS%" -f Makefile.Release -j 8
-          if errorlevel 1 (
-            echo jom failed
-            exit /b 1
-          )
           cd ..
-          echo Manual build succeeded, now running full buildRelease.cmd
+          echo Manual build succeeded.
+
+      - name: Clean existing build directories
+        shell: cmd
+        working-directory: ./taskexplorer_source/Build
+        run: |
+          echo Cleaning previous build directories...
+          if exist Build_qtsingleapp_x64 rmdir /s /q Build_qtsingleapp_x64
+          if exist Build_qtservice_x64 rmdir /s /q Build_qtservice_x64
+          if exist Build_qwt_x64 rmdir /s /q Build_qwt_x64
+          if exist Build_qhexedit_x64 rmdir /s /q Build_qhexedit_x64
+          if exist Build_qextwidgets_x64 rmdir /s /q Build_qextwidgets_x64
+          if exist Build_MiscHelpers_x64 rmdir /s /q Build_MiscHelpers_x64
+          if exist Build_TaskExplorer_x64 rmdir /s /q Build_TaskExplorer_x64
+
+      - name: Patch prepTools.cmd to use absolute paths
+        shell: pwsh
+        working-directory: ./taskexplorer_source/Build
+        run: |
+          $file = "prepTools.cmd"
+          $content = Get-Content $file -Raw
+          # Replace relative qt_path with absolute path
+          $qtAbsPath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64".Replace('\', '\\')
+          $jomAbsPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom".Replace('\', '\\')
+          $content = $content -replace 'set qt_path=%~dp0\.\.\\\.\.\\Qt\\%qt_version%', "set qt_path=$qtAbsPath"
+          $content = $content -replace 'set jom_path=%~dp0\.\.\\\.\.\\Qt\\Tools\\QtCreator\\bin\\jom', "set jom_path=$jomAbsPath"
+          Set-Content $file $content
+          Write-Host "Patched $file with absolute paths:"
+          Get-Content $file | Select-String "qt_path|jom_path"
+
+      - name: Build full app
+        shell: cmd
+        working-directory: ./taskexplorer_source/Build
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\${{ env.VS_VERSION }}\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           buildRelease.cmd x64
 
       - name: Create zip archive locally

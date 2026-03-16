@@ -127,9 +127,8 @@ jobs:
 
           Set-Content $file $content
 
-          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH)
-          $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}\QtCore\private"
-          # 将反斜杠转换为正斜杠，避免 qmake 转义问题
+          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH，指向 QtCore 目录，而非 private 子目录)
+          $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}\QtCore"
           $privateIncludePathForward = $privateIncludePath -replace '\\', '/'
           $lines = Get-Content $file
           $newLines = @()

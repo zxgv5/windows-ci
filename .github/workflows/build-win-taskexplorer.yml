@@ -6,7 +6,6 @@ on:
 
 env:
   QT_VERSION: '5.15.2'
-  VS_VERSION: '2022'
 
 permissions:
   contents: write
@@ -39,181 +38,47 @@ jobs:
         run: |
           pip install aqtinstall
           aqt install-qt --outputdir "${{ github.workspace }}\taskexplorer_source\Qt" `
-            windows desktop "${{ env.QT_VERSION }}" win64_msvc2019_64
+            windows desktop "${{ env.QT_VERSION }}" win64_msvc2019_64 --modules qtcharts qtscript
           aqt install-tool --outputdir "${{ github.workspace }}\taskexplorer_source\Qt" `
             windows desktop tools_qtcreator
-          echo "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\bin" `
-            | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $qtDir = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64"
+          echo "QTDIR=$qtDir" >> $env:GITHUB_ENV
+          echo "$qtDir\bin" >> $env:GITHUB_PATH
 
-      - name: Verify qt installation
-        shell: pwsh
-        run: |
-          $qtBin = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\bin"
-          if (Test-Path "$qtBin\qmake.exe") {
-            Write-Host "qmake.exe found"
-          } else {
-            Write-Host "qmake.exe NOT found!"
-            exit 1
-          }
+      - name: Setup msbuild
+        uses: microsoft/setup-msbuild@main
 
-      - name: Verify jom installation
-        shell: pwsh
-        run: |
-          $jomPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom\jom.exe"
-          if (Test-Path $jomPath) {
-            Write-Host "jom.exe found at $jomPath"
-          } else {
-            Write-Host "jom.exe NOT found at $jomPath!"
-            Get-ChildItem "${{ github.workspace }}\taskexplorer_source\Qt\Tools" -Recurse -Filter jom.exe -ErrorAction SilentlyContinue
-            exit 1
-          }
+      - name: Build solution
+        working-directory: ./taskexplorer_source
+        run: msbuild "TaskExplorer+Libs.sln" /p:Configuration=Release /p:Platform=x64 /m
 
-      - name: Check required submodules
+      - name: Locate output files
+        id: locate_output
         shell: pwsh
         working-directory: ./taskexplorer_source
         run: |
-          Write-Host "Checking required directories..."
-          $requiredDirs = @(
-            "QtSingleApp/qtsingleapp/qtsingleapp",
-            "qtservice/qtservice/qtservice",
-            "qwt/qwt",
-            "qhexedit/src",
-            "qextwidgets",
-            "MiscHelpers",
-            "TaskExplorer"
-          )
-          foreach ($dir in $requiredDirs) {
-            $fullPath = Join-Path (Get-Location) $dir
-            if (Test-Path $fullPath) {
-              Write-Host "OK: $fullPath exists"
+          $exe = Get-ChildItem -Recurse -Filter "TaskExplorer.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($exe) {
+            $outDir = $exe.Directory.FullName
+            echo "Output directory: $outDir"
+            echo "OUTPUT_DIR=$outDir" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "TaskExplorer.exe not found, using default bin\x64\Release"
+            $default = "${{ github.workspace }}\taskexplorer_source\bin\x64\Release"
+            if (Test-Path $default) {
+              echo "OUTPUT_DIR=$default" >> $env:GITHUB_OUTPUT
             } else {
-              Write-Host "MISSING: $fullPath does not exist!"
-              Get-ChildItem (Split-Path $fullPath -Parent) -ErrorAction SilentlyContinue
+              Write-Host "Default output directory not found either, failing"
+              exit 1
             }
           }
-          Write-Host "All .pro files found:"
-          Get-ChildItem -Recurse -Filter *.pro | ForEach-Object { Write-Host $_.FullName }
-
-      - name: Clean existing build directories
-        shell: cmd
-        working-directory: ./taskexplorer_source/Build
-        run: |
-          echo Cleaning previous build directories...
-          if exist Build_qtsingleapp_x64 rmdir /s /q Build_qtsingleapp_x64
-          if exist Build_qtservice_x64 rmdir /s /q Build_qtservice_x64
-          if exist Build_qwt_x64 rmdir /s /q Build_qtservice_x64
-          if exist Build_qhexedit_x64 rmdir /s /q Build_qhexedit_x64
-          if exist Build_qextwidgets_x64 rmdir /s /q Build_qextwidgets_x64
-          if exist Build_MiscHelpers_x64 rmdir /s /q Build_MiscHelpers_x64
-          if exist Build_TaskExplorer_x64 rmdir /s /q Build_TaskExplorer_x64
-
-      - name: Patch prepTools.cmd to use absolute paths
-        shell: pwsh
-        working-directory: ./taskexplorer_source/Build
-        run: |
-          $file = "prepTools.cmd"
-          $content = Get-Content $file -Raw
-
-          # 将 qt_path 的初始定义改为完整绝对路径（已包含 msvc2019_64）
-          $qtFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64"
-          $content = $content -replace 'set qt_path=%~dp0\.\.\\\.\.\\Qt\\%qt_version%', "set qt_path=$qtFullPath"
-
-          # 注释掉后续的 qt_path 拼接行（set qt_path=%qt_path%\%qt_build%）
-          $content = $content -replace '(set qt_path=%qt_path%\\%qt_build%)', 'rem $1'
-
-          # 将 jom_path 改为绝对路径
-          $jomFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom"
-          $content = $content -replace 'set jom_path=%~dp0\.\.\\\.\.\\Qt\\Tools\\QtCreator\\bin\\jom', "set jom_path=$jomFullPath"
-
-          Set-Content $file $content
-          Write-Host "Patched $file"
-
-      - name: Locate qglobal_p.h and patch TaskExplorer.qc.pro
-        shell: pwsh
-        working-directory: ./taskexplorer_source
-        run: |
-          # 查找 qglobal_p.h
-          $qtBase = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64"
-          Write-Host "Searching for qglobal_p.h under $qtBase ..."
-          $found = Get-ChildItem -Path $qtBase -Recurse -Filter "qglobal_p.h" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($found) {
-            $fullPath = $found.FullName
-            Write-Host "Found at: $fullPath"
-            # 假设路径为 .../include/QtCore/5.15.2/QtCore/private/qglobal_p.h
-            $dirPrivate = Split-Path $fullPath -Parent          # private
-            $dirQtCore = Split-Path $dirPrivate -Parent         # QtCore (version下)
-            $dirVersion = Split-Path $dirQtCore -Parent         # 5.15.2 (version)
-            # 转换正斜杠
-            $includePath1 = $dirVersion -replace '\\', '/'
-            $includePath2 = $dirQtCore -replace '\\', '/'
-            Write-Host "Include paths to add: $includePath1, $includePath2"
-          } else {
-            Write-Host "qglobal_p.h not found! Using default paths."
-            $includePath1 = "$qtBase/include/QtCore/${{ env.QT_VERSION }}" -replace '\\', '/'
-            $includePath2 = "$qtBase/include/QtCore/${{ env.QT_VERSION }}/QtCore" -replace '\\', '/'
-          }
-
-          # 直接修改 TaskExplorer.qc.pro 文件，在末尾添加 INCLUDEPATH
-          $proFile = "TaskExplorer/TaskExplorer.qc.pro"
-          if (Test-Path $proFile) {
-            Add-Content -Path $proFile -Value ""
-            Add-Content -Path $proFile -Value "INCLUDEPATH += $includePath1"
-            Add-Content -Path $proFile -Value "INCLUDEPATH += $includePath2"
-            Write-Host "Patched $proFile with additional include paths."
-          } else {
-            Write-Host "ERROR: $proFile not found!"
-            exit 1
-          }
-
-      - name: Patch missing includes for QDesktopWidget
-        shell: pwsh
-        working-directory: ./taskexplorer_source
-        run: |
-          # 直接查找 SettingsWindow.cpp 并添加 #include <QDesktopWidget>
-          $file = Get-ChildItem -Path "${{ github.workspace }}\taskexplorer_source" -Recurse -Filter "SettingsWindow.cpp" | Select-Object -First 1
-          if ($file) {
-            $content = Get-Content $file.FullName
-            # 检查是否已经包含
-            if ($content -notmatch '#include\s*<QDesktopWidget>') {
-              # 在第一个 #include 之后插入，或者如果不存在就在文件开头插入
-              $newContent = @()
-              $includeInserted = $false
-              foreach ($line in $content) {
-                if ($line -match '^#include' -and -not $includeInserted) {
-                  $newContent += $line
-                  $newContent += '#include <QDesktopWidget>'
-                  $includeInserted = $true
-                } else {
-                  $newContent += $line
-                }
-              }
-              if (-not $includeInserted) {
-                # 如果没有找到任何 #include，则在开头插入
-                $newContent = @('#include <QDesktopWidget>') + $content
-              }
-              Set-Content $file.FullName $newContent
-              Write-Host "Added #include <QDesktopWidget> to $($file.FullName)"
-            } else {
-              Write-Host "SettingsWindow.cpp already includes QDesktopWidget"
-            }
-          } else {
-            Write-Host "SettingsWindow.cpp not found!"
-            exit 1
-          }
-
-      - name: Build full app
-        shell: cmd
-        working-directory: ./taskexplorer_source/Build
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\${{ env.VS_VERSION }}\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          buildRelease.cmd x64
 
       - name: Create zip archive locally
         working-directory: ./taskexplorer_source
         shell: pwsh
         run: |
           $zipName = "../dist/taskexplorer-${{ env.BUILD_DATE }}.zip"
-          $source = "./bin/x64/Release"
+          $source = "${{ steps.locate_output.outputs.OUTPUT_DIR }}"
           $tempDir = "./temp_zip_dir"
           New-Item -ItemType Directory -Path "../dist" -Force | Out-Null
           if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir }

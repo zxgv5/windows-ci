@@ -115,27 +115,28 @@ jobs:
           $content = Get-Content $file -Raw
 
           # 将 qt_path 的初始定义改为完整绝对路径（已包含 msvc2019_64）
-          $qtFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64".Replace('\', '\\')
+          # 注意：路径使用单反斜杠，避免双反斜杠问题
+          $qtFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64"
           $content = $content -replace 'set qt_path=%~dp0\.\.\\\.\.\\Qt\\%qt_version%', "set qt_path=$qtFullPath"
 
           # 注释掉后续的 qt_path 拼接行（set qt_path=%qt_path%\%qt_build%）
           $content = $content -replace '(set qt_path=%qt_path%\\%qt_build%)', 'rem $1'
 
           # 将 jom_path 改为绝对路径
-          $jomFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom".Replace('\', '\\')
+          $jomFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom"
           $content = $content -replace 'set jom_path=%~dp0\.\.\\\.\.\\Qt\\Tools\\QtCreator\\bin\\jom', "set jom_path=$jomFullPath"
 
           Set-Content $file $content
 
           # 为 x64 分支添加私有头文件路径到 INCLUDE 环境变量
-          $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}\QtCore\private".Replace('\', '\\')
+          $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}\QtCore\private"
           $lines = Get-Content $file
           $newLines = @()
           foreach ($line in $lines) {
             $newLines += $line
             if ($line -match 'call "%vs_install%\\VC\\Auxiliary\\Build\\vcvars64\.bat"') {
-              # 添加一行设置 INCLUDE，确保编译器能找到私有头文件
-              $newLines += "  set INCLUDE=%INCLUDE%;`"$privateIncludePath`""
+              # 添加一行设置 INCLUDE，使用引号避免空格问题
+              $newLines += "  set `"INCLUDE=%INCLUDE%;$privateIncludePath`""
             }
           }
           Set-Content $file $newLines

@@ -134,18 +134,22 @@ jobs:
           if ($found) {
             $fullPath = $found.FullName
             Write-Host "Found at: $fullPath"
-            # 向上找到合适的包含路径，使得 #include "QtCore/private/qglobal_p.h" 能解析
-            # 假设文件路径为 ...\include\QtCore\5.15.2\QtCore\private\qglobal_p.h
-            # 需要包含 ...\include\QtCore\5.15.2
-            $dir = Split-Path $fullPath -Parent          # private
-            $dir = Split-Path $dir -Parent                # QtCore (版本号下)
-            $includePath = Split-Path $dir -Parent        # 5.15.2 版本目录
-            # 转换为正斜杠
-            $includePathForward = $includePath -replace '\\', '/'
-            Write-Host "Adding include path: $includePathForward"
+            # 假设路径为 .../include/QtCore/5.15.2/QtCore/private/qglobal_p.h
+            $dirPrivate = Split-Path $fullPath -Parent          # private
+            $dirQtCore = Split-Path $dirPrivate -Parent         # QtCore (version下)
+            $dirVersion = Split-Path $dirQtCore -Parent         # 5.15.2 (version)
+            # 添加两个路径：version目录和QtCore目录
+            $includePaths = @(
+              ($dirVersion -replace '\\', '/'),
+              ($dirQtCore -replace '\\', '/')
+            )
+            Write-Host "Adding include paths: $($includePaths -join ', ')"
           } else {
-            Write-Host "qglobal_p.h not found! Using default path."
-            $includePathForward = "$qtBase/include/QtCore/${{ env.QT_VERSION }}" -replace '\\', '/'
+            Write-Host "qglobal_p.h not found! Using default paths."
+            $includePaths = @(
+              ("$qtBase/include/QtCore/${{ env.QT_VERSION }}" -replace '\\', '/'),
+              ("$qtBase/include/QtCore/${{ env.QT_VERSION }}/QtCore" -replace '\\', '/')
+            )
           }
 
           # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH)
@@ -154,7 +158,9 @@ jobs:
           foreach ($line in $lines) {
             $newLines += $line
             if ($line -match 'call "%vs_install%\\VC\\Auxiliary\\Build\\vcvars64\.bat"') {
-              $newLines += "  set qt_params=%qt_params% `"INCLUDEPATH+=$includePathForward`""
+              foreach ($path in $includePaths) {
+                $newLines += "  set qt_params=%qt_params% `"INCLUDEPATH+=$path`""
+              }
             }
           }
           Set-Content $file $newLines

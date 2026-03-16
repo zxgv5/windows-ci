@@ -125,6 +125,9 @@ jobs:
           $jomFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom"
           $content = $content -replace 'set jom_path=%~dp0\.\.\\\.\.\\Qt\\Tools\\QtCreator\\bin\\jom', "set jom_path=$jomFullPath"
 
+          # 将 x64 分支中的 set qt_params= 改为空（去掉多余空格）
+          $content = $content -replace '(set qt_params= )', 'set qt_params='
+
           Set-Content $file $content
 
           # 动态查找 qglobal_p.h 文件，确定正确的包含路径
@@ -152,14 +155,14 @@ jobs:
             )
           }
 
-          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH)
+          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH，不加引号)
           $lines = Get-Content $file
           $newLines = @()
           foreach ($line in $lines) {
             $newLines += $line
             if ($line -match 'call "%vs_install%\\VC\\Auxiliary\\Build\\vcvars64\.bat"') {
               foreach ($path in $includePaths) {
-                $newLines += "  set qt_params=%qt_params% `"INCLUDEPATH+=$path`""
+                $newLines += "  set qt_params=%qt_params% INCLUDEPATH+=$path"
               }
             }
           }

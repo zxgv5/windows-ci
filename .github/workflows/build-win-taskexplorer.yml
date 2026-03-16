@@ -169,41 +169,36 @@ jobs:
         shell: pwsh
         working-directory: ./taskexplorer_source
         run: |
-          # 查找 stdafx.h
-          $stdafx = Get-ChildItem -Recurse -Filter "stdafx.h" | Select-Object -First 1
-          if ($stdafx) {
-            $content = Get-Content $stdafx.FullName -Raw
-            if ($content -notmatch '#include <QDesktopWidget>') {
-              Add-Content $stdafx.FullName "`n#include <QDesktopWidget>"
-              Write-Host "Added #include <QDesktopWidget> to $($stdafx.FullName)"
-            } else {
-              Write-Host "stdafx.h already includes QDesktopWidget"
-            }
-          } else {
-            Write-Host "stdafx.h not found, patching SettingsWindow.cpp directly"
-            $settingsWindow = Get-ChildItem -Recurse -Filter "SettingsWindow.cpp" | Select-Object -First 1
-            if ($settingsWindow) {
-              $content = Get-Content $settingsWindow.FullName
+          # 直接查找 SettingsWindow.cpp 并添加 #include <QDesktopWidget>
+          $file = Get-ChildItem -Path "${{ github.workspace }}\taskexplorer_source" -Recurse -Filter "SettingsWindow.cpp" | Select-Object -First 1
+          if ($file) {
+            $content = Get-Content $file.FullName
+            # 检查是否已经包含
+            if ($content -notmatch '#include\s*<QDesktopWidget>') {
+              # 在第一个 #include 之后插入，或者如果不存在就在文件开头插入
               $newContent = @()
-              $included = $false
+              $includeInserted = $false
               foreach ($line in $content) {
-                $newContent += $line
-                if ($line -match '^#include' -and -not $included) {
-                  # 在第一个#include之后插入
+                if ($line -match '^#include' -and -not $includeInserted) {
+                  $newContent += $line
                   $newContent += '#include <QDesktopWidget>'
-                  $included = $true
+                  $includeInserted = $true
+                } else {
+                  $newContent += $line
                 }
               }
-              if (-not $included) {
-                # 如果没有#include行，则在文件开头插入
-                $newContent = @('#include <QDesktopWidget>') + $newContent
+              if (-not $includeInserted) {
+                # 如果没有找到任何 #include，则在开头插入
+                $newContent = @('#include <QDesktopWidget>') + $content
               }
-              Set-Content $settingsWindow.FullName $newContent
-              Write-Host "Added #include <QDesktopWidget> to $($settingsWindow.FullName)"
+              Set-Content $file.FullName $newContent
+              Write-Host "Added #include <QDesktopWidget> to $($file.FullName)"
             } else {
-              Write-Host "SettingsWindow.cpp not found, cannot patch!"
-              exit 1
+              Write-Host "SettingsWindow.cpp already includes QDesktopWidget"
             }
+          } else {
+            Write-Host "SettingsWindow.cpp not found!"
+            exit 1
           }
 
       - name: Build full app

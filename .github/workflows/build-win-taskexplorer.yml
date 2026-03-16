@@ -165,6 +165,47 @@ jobs:
             exit 1
           }
 
+      - name: Patch missing includes for QDesktopWidget
+        shell: pwsh
+        working-directory: ./taskexplorer_source
+        run: |
+          # 查找 stdafx.h
+          $stdafx = Get-ChildItem -Recurse -Filter "stdafx.h" | Select-Object -First 1
+          if ($stdafx) {
+            $content = Get-Content $stdafx.FullName -Raw
+            if ($content -notmatch '#include <QDesktopWidget>') {
+              Add-Content $stdafx.FullName "`n#include <QDesktopWidget>"
+              Write-Host "Added #include <QDesktopWidget> to $($stdafx.FullName)"
+            } else {
+              Write-Host "stdafx.h already includes QDesktopWidget"
+            }
+          } else {
+            Write-Host "stdafx.h not found, patching SettingsWindow.cpp directly"
+            $settingsWindow = Get-ChildItem -Recurse -Filter "SettingsWindow.cpp" | Select-Object -First 1
+            if ($settingsWindow) {
+              $content = Get-Content $settingsWindow.FullName
+              $newContent = @()
+              $included = $false
+              foreach ($line in $content) {
+                $newContent += $line
+                if ($line -match '^#include' -and -not $included) {
+                  # 在第一个#include之后插入
+                  $newContent += '#include <QDesktopWidget>'
+                  $included = $true
+                }
+              }
+              if (-not $included) {
+                # 如果没有#include行，则在文件开头插入
+                $newContent = @('#include <QDesktopWidget>') + $newContent
+              }
+              Set-Content $settingsWindow.FullName $newContent
+              Write-Host "Added #include <QDesktopWidget> to $($settingsWindow.FullName)"
+            } else {
+              Write-Host "SettingsWindow.cpp not found, cannot patch!"
+              exit 1
+            }
+          }
+
       - name: Build full app
         shell: cmd
         working-directory: ./taskexplorer_source/Build

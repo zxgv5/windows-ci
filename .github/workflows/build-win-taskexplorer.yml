@@ -107,7 +107,7 @@ jobs:
           if exist Build_MiscHelpers_x64 rmdir /s /q Build_MiscHelpers_x64
           if exist Build_TaskExplorer_x64 rmdir /s /q Build_TaskExplorer_x64
 
-      - name: Patch prepTools.cmd to use absolute paths and add private headers via INCLUDEPATH
+      - name: Patch prepTools.cmd to use absolute paths
         shell: pwsh
         working-directory: ./taskexplorer_source/Build
         run: |
@@ -125,12 +125,14 @@ jobs:
           $jomFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom"
           $content = $content -replace 'set jom_path=%~dp0\.\.\\\.\.\\Qt\\Tools\\QtCreator\\bin\\jom', "set jom_path=$jomFullPath"
 
-          # 将 x64 分支中的 set qt_params= 改为空（去掉多余空格）
-          $content = $content -replace '(set qt_params= )', 'set qt_params='
-
           Set-Content $file $content
+          Write-Host "Patched $file"
 
-          # 动态查找 qglobal_p.h 文件，确定正确的包含路径
+      - name: Locate qglobal_p.h and patch TaskExplorer.qc.pro
+        shell: pwsh
+        working-directory: ./taskexplorer_source
+        run: |
+          # 查找 qglobal_p.h
           $qtBase = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64"
           Write-Host "Searching for qglobal_p.h under $qtBase ..."
           $found = Get-ChildItem -Path $qtBase -Recurse -Filter "qglobal_p.h" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -141,35 +143,27 @@ jobs:
             $dirPrivate = Split-Path $fullPath -Parent          # private
             $dirQtCore = Split-Path $dirPrivate -Parent         # QtCore (version下)
             $dirVersion = Split-Path $dirQtCore -Parent         # 5.15.2 (version)
-            # 添加两个路径：version目录和QtCore目录
-            $includePaths = @(
-              ($dirVersion -replace '\\', '/'),
-              ($dirQtCore -replace '\\', '/')
-            )
-            Write-Host "Adding include paths: $($includePaths -join ', ')"
+            # 转换正斜杠
+            $includePath1 = $dirVersion -replace '\\', '/'
+            $includePath2 = $dirQtCore -replace '\\', '/'
+            Write-Host "Include paths to add: $includePath1, $includePath2"
           } else {
             Write-Host "qglobal_p.h not found! Using default paths."
-            $includePaths = @(
-              ("$qtBase/include/QtCore/${{ env.QT_VERSION }}" -replace '\\', '/'),
-              ("$qtBase/include/QtCore/${{ env.QT_VERSION }}/QtCore" -replace '\\', '/')
-            )
+            $includePath1 = "$qtBase/include/QtCore/${{ env.QT_VERSION }}" -replace '\\', '/'
+            $includePath2 = "$qtBase/include/QtCore/${{ env.QT_VERSION }}/QtCore" -replace '\\', '/'
           }
 
-          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH，不加引号)
-          $lines = Get-Content $file
-          $newLines = @()
-          foreach ($line in $lines) {
-            $newLines += $line
-            if ($line -match 'call "%vs_install%\\VC\\Auxiliary\\Build\\vcvars64\.bat"') {
-              foreach ($path in $includePaths) {
-                $newLines += "  set qt_params=%qt_params% INCLUDEPATH+=$path"
-              }
-            }
+          # 直接修改 TaskExplorer.qc.pro 文件，在末尾添加 INCLUDEPATH
+          $proFile = "TaskExplorer/TaskExplorer.qc.pro"
+          if (Test-Path $proFile) {
+            Add-Content -Path $proFile -Value ""
+            Add-Content -Path $proFile -Value "INCLUDEPATH += $includePath1"
+            Add-Content -Path $proFile -Value "INCLUDEPATH += $includePath2"
+            Write-Host "Patched $proFile with additional include paths."
+          } else {
+            Write-Host "ERROR: $proFile not found!"
+            exit 1
           }
-          Set-Content $file $newLines
-
-          Write-Host "Patched $file :"
-          Get-Content $file
 
       - name: Build full app
         shell: cmd

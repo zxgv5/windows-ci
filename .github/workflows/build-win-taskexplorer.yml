@@ -101,7 +101,7 @@ jobs:
           echo Cleaning previous build directories...
           if exist Build_qtsingleapp_x64 rmdir /s /q Build_qtsingleapp_x64
           if exist Build_qtservice_x64 rmdir /s /q Build_qtservice_x64
-          if exist Build_qwt_x64 rmdir /s /q Build_qwt_x64
+          if exist Build_qwt_x64 rmdir /s /q Build_qtservice_x64
           if exist Build_qhexedit_x64 rmdir /s /q Build_qhexedit_x64
           if exist Build_qextwidgets_x64 rmdir /s /q Build_qextwidgets_x64
           if exist Build_MiscHelpers_x64 rmdir /s /q Build_MiscHelpers_x64
@@ -127,8 +127,8 @@ jobs:
 
           Set-Content $file $content
 
-          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH，指向 QtCore 目录，而非 private 子目录)
-          $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}\QtCore"
+          # 为 x64 分支添加私有头文件路径到 qt_params (通过 INCLUDEPATH，指向 QtCore 版本目录)
+          $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}"
           $privateIncludePathForward = $privateIncludePath -replace '\\', '/'
           $lines = Get-Content $file
           $newLines = @()

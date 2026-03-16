@@ -104,7 +104,16 @@ jobs:
           echo jom_path=%jom_path%
           echo Current directory: %cd%
 
-          :: Use absolute path for jom.exe (verified in previous step)
+          :: Use absolute path for qmake
+          set QMAKE_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\Qt\%QT_VERSION%\msvc2019_64\bin\qmake.exe
+          echo Checking qmake.exe at %QMAKE_ABS%
+          if not exist "%QMAKE_ABS%" (
+            echo ERROR: qmake.exe not found at %QMAKE_ABS%
+            dir "%GITHUB_WORKSPACE%\taskexplorer_source\Qt\%QT_VERSION%\msvc2019_64\bin"
+            exit /b 1
+          )
+
+          :: Use absolute path for jom
           set JOM_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\Qt\Tools\QtCreator\bin\jom\jom.exe
           echo Checking jom.exe at %JOM_ABS%
           if not exist "%JOM_ABS%" (
@@ -124,13 +133,13 @@ jobs:
 
           mkdir Build_qtsingleapp_x64
           cd Build_qtsingleapp_x64
-          echo Running qmake with debug: "%qt_path%\bin\qmake.exe" "%PRO_FILE%" -d
-          "%qt_path%\bin\qmake.exe" "%PRO_FILE%" -d
+          echo Running qmake with debug: "%QMAKE_ABS%" "%PRO_FILE%" -d
+          "%QMAKE_ABS%" "%PRO_FILE%" -d
           if errorlevel 1 (
             echo qmake failed
             exit /b 1
           )
-          echo qmake succeeded, now running jom using absolute path...
+          echo qmake succeeded, now running jom...
           "%JOM_ABS%" -f Makefile.Release -j 8
           if errorlevel 1 (
             echo jom failed

@@ -141,7 +141,7 @@ jobs:
           }
           Set-Content $file $newLines
 
-          Write-Host "Patched $file:"
+          Write-Host "Patched $file :"
           Get-Content $file
 
       - name: Build full app

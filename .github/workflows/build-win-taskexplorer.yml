@@ -107,7 +107,7 @@ jobs:
           if exist Build_MiscHelpers_x64 rmdir /s /q Build_MiscHelpers_x64
           if exist Build_TaskExplorer_x64 rmdir /s /q Build_TaskExplorer_x64
 
-      - name: Patch prepTools.cmd to use absolute paths and add private includes
+      - name: Patch prepTools.cmd to use absolute paths and set INCLUDE for private headers
         shell: pwsh
         working-directory: ./taskexplorer_source/Build
         run: |
@@ -125,18 +125,17 @@ jobs:
           $jomFullPath = "${{ github.workspace }}\taskexplorer_source\Qt\Tools\QtCreator\bin\jom".Replace('\', '\\')
           $content = $content -replace 'set jom_path=%~dp0\.\.\\\.\.\\Qt\\Tools\\QtCreator\\bin\\jom', "set jom_path=$jomFullPath"
 
-          # 先保存上述替换后的内容
           Set-Content $file $content
 
-          # 为 x64 分支添加私有头文件路径到 qt_params
+          # 为 x64 分支添加私有头文件路径到 INCLUDE 环境变量
           $privateIncludePath = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64\include\QtCore\${{ env.QT_VERSION }}\QtCore\private".Replace('\', '\\')
           $lines = Get-Content $file
           $newLines = @()
           foreach ($line in $lines) {
             $newLines += $line
             if ($line -match 'call "%vs_install%\\VC\\Auxiliary\\Build\\vcvars64\.bat"') {
-              # 添加一行设置 qt_params（注意缩进与原行一致）
-              $newLines += "  set qt_params=%qt_params% -I`"$privateIncludePath`""
+              # 添加一行设置 INCLUDE，确保编译器能找到私有头文件
+              $newLines += "  set INCLUDE=%INCLUDE%;`"$privateIncludePath`""
             }
           }
           Set-Content $file $newLines

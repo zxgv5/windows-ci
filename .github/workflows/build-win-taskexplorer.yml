@@ -49,7 +49,17 @@ jobs:
       - name: Setup msbuild
         uses: microsoft/setup-msbuild@main
 
-      # 构建 phlib 用户态库（不依赖 WDK）
+      # 修复 phlib 项目中的头文件路径问题（通过创建目录链接）
+      - name: Fix phlib include paths
+        shell: pwsh
+        working-directory: ./taskexplorer_source/ProcessHacker
+        run: |
+          # 创建必要的目录链接，使得项目文件中错误的路径 phlib\phlib\include 指向真实的 phlib\include
+          if (-not (Test-Path "phlib\phlib")) { New-Item -ItemType Directory -Force -Path "phlib\phlib" }
+          cmd /c mklink /J "phlib\phlib\include" "phlib\include" 2>$null
+          if (Test-Path "phlib\phlib\include") { Write-Host "Created junction for phlib\phlib\include -> phlib\include" }
+          else { Write-Host "Failed to create junction" }
+
       - name: Build phlib (user-mode library)
         working-directory: ./taskexplorer_source/ProcessHacker/phlib
         run: msbuild phlib.vcxproj /p:Configuration=Release /p:Platform=x64 /m

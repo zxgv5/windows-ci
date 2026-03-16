@@ -44,22 +44,15 @@ jobs:
           $qtDir = "${{ github.workspace }}\taskexplorer_source\Qt\${{ env.QT_VERSION }}\msvc2019_64"
           echo "QTDIR=$qtDir" >> $env:GITHUB_ENV
           echo "$qtDir\bin" >> $env:GITHUB_PATH
-          # 设置 Qt5_DIR (供 CMake 查找)
           echo "Qt5_DIR=$qtDir\lib\cmake\Qt5" >> $env:GITHUB_ENV
-          # 设置 QtMsBuild 路径 (供 MSBuild 集成)
-          $qtMsBuild = "$qtDir\msbuild"
-          if (Test-Path $qtMsBuild) {
-            echo "QtMsBuild=$qtMsBuild" >> $env:GITHUB_ENV
-          } else {
-            Write-Host "Warning: QtMsBuild directory not found at $qtMsBuild"
-          }
 
       - name: Setup msbuild
         uses: microsoft/setup-msbuild@main
 
-      - name: Build ProcessHacker (KSystemInformer) x64
-        working-directory: ./taskexplorer_source/ProcessHacker/KSystemInformer
-        run: msbuild KSystemInformer.sln /p:Configuration=Release /p:Platform=x64 /m
+      # 构建 phlib 用户态库（不依赖 WDK）
+      - name: Build phlib (user-mode library)
+        working-directory: ./taskexplorer_source/ProcessHacker/phlib
+        run: msbuild phlib.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 
       - name: Build main solution (TaskExplorer+Libs.sln) x64
         working-directory: ./taskexplorer_source

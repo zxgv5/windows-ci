@@ -122,19 +122,19 @@ jobs:
             exit /b 1
           )
 
-          set PRO_FILE=..\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
-          echo Checking pro file: %PRO_FILE%
-          if not exist "%PRO_FILE%" (
-            echo ERROR: pro file not found: %PRO_FILE%
-            echo Listing parent QtSingleApp directory:
-            dir ..\QtSingleApp\qtsingleapp\qtsingleapp
+          :: Use absolute path for pro file
+          set PRO_FILE_ABS=%GITHUB_WORKSPACE%\taskexplorer_source\QtSingleApp\qtsingleapp\qtsingleapp\qtsingleapp.qc.pro
+          echo Checking pro file at %PRO_FILE_ABS%
+          if not exist "%PRO_FILE_ABS%" (
+            echo ERROR: pro file not found at absolute path
+            dir "%GITHUB_WORKSPACE%\taskexplorer_source\QtSingleApp\qtsingleapp\qtsingleapp"
             exit /b 1
           )
 
           mkdir Build_qtsingleapp_x64
           cd Build_qtsingleapp_x64
-          echo Running qmake with debug: "%QMAKE_ABS%" "%PRO_FILE%" -d
-          "%QMAKE_ABS%" "%PRO_FILE%" -d
+          echo Running qmake with debug: "%QMAKE_ABS%" "%PRO_FILE_ABS%" -d
+          "%QMAKE_ABS%" "%PRO_FILE_ABS%" -d
           if errorlevel 1 (
             echo qmake failed
             exit /b 1

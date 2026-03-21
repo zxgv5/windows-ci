@@ -1,22 +1,25 @@
-name: 'Erase keystore zip with aes256 and release'
-description: '擦除签名用key，安装7zip，将构建生成物打包为.7z(启用aes256加密，及文件名加密)，并发布的可重用action'
+name: 'Pack with aes256 and release'
+description: '安装7zip，将构建生成物打包为.7z(启用aes256加密，及文件名加密)，并发布的可重用action'
 
-# 定义外部输入参数（必填）
 inputs:
-  ZIP_AES256_PWD:
-    description: '7z压缩包的AES256加密口令（注意保密，建议用secrets传递）'
-    required: true
-    type: string
   BUILD_ARTIFACT_PATH:
     description: '构建生成物的文件路径（不含.7z后缀），用于打包'
     required: true
     type: string
-  RELEASE_TAG_NAME:
-    description: 'GitHub Release对应的Tag名称'
+  ZIP_AES256_PWD:
+    description: '7z压缩包的AES256口令，注意用secrets传递'
     required: true
     type: string
-
-# 定义Action的运行步骤
+  ZIP_COMPRESS_LEVEL:
+    description: '7z压缩包压缩等级，1-9'
+    required: true
+    type: string
+    default: '9'
+  RELEASE_TAG_NAME:
+    description: 'GitHub Release的Tag名'
+    required: true
+    type: string
+ 
 runs:
   using: "composite"  # 声明为复合步骤Action（支持多shell命令）
   steps:
@@ -37,7 +40,7 @@ runs:
           -mhe=on \
           -t7z \
           -m0=lzma2 \
-          -mx=5 \
+          -mx="${{ inputs.ZIP_COMPRESS_LEVEL }}" \
           -mfb=64 \
           -md=32m \
           -ms=on \

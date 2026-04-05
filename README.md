@@ -1,3 +1,1 @@
-# 部分自用windows app ci仓库
----
-# 试验用，勿star，勿fork
+# windows app ci test repository, do not star, do not fork.

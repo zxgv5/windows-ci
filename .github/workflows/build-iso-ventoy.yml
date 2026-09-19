@@ -6,16 +6,12 @@ on:
 env:
   BUILD_DATE: ''
   VENTOY_REF: 'master'
-  # Cross-compilation toolchains (downloaded to /opt/)
-  TOOLCHAIN_AARCH64_URL: 'https://releases.linaro.org/components/toolchain/binaries/7.4-2019.02/aarch64-linux-gnu/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz'
-  TOOLCHAIN_UCLIBC_URL: 'https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2020.08-1.tar.bz2'
-  TOOLCHAIN_MIPS_URL: 'https://github.com/ventoy/vtoytoolchain/releases/download/1.0/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz'
-  TOOLCHAIN_MIPS64EL_URL: 'https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2'
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ubuntu-22.04: gcc-7 unavailable on 24.04, GRUB2 needs older GCC era toolchain
+    runs-on: ubuntu-22.04
     steps:
       - name: Set swap space
         uses: pierotofy/set-swap-space@master
@@ -49,32 +45,27 @@ jobs:
       - name: Setup build environment
         run: |
           sudo apt update -y || true
+          # gcc-7 not available; ubuntu-22.04 default gcc-11 works with --disable-werror
           sudo apt install -y --no-install-recommends \
-            gcc-7 g++-7 gcc-multilib g++-multilib \
+            gcc g++ gcc-multilib g++-multilib \
             build-essential wget vim dos2unix rsync \
             autoconf automake libtool gettext bison \
             binutils flex libdevmapper-dev libfuse-dev \
             libfreetype6-dev libxpm-dev libssl-dev \
             zip nasm acpica-tools xorriso mtools \
             sbsigntool libgnutls28-dev uuid-dev bsdmainutils
-          # Link gcc-7 as default
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-7 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-7 100
 
       - name: Download third-party dependencies
         working-directory: ./ventoy_source
         run: |
           set -euo pipefail
 
+          cd DOC
           # dietlibc: prefer fefe.de, fallback to Debian mirror
-          download_dietlibc() {
-            cd DOC
-            wget --tries=3 --timeout=30 \
-              https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz \
-              || wget --tries=3 --timeout=30 -O dietlibc-0.34.tar.xz \
-                "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
-          }
-          download_dietlibc
+          wget --tries=3 --timeout=30 \
+            https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz \
+            || wget --tries=3 --timeout=30 -O dietlibc-0.34.tar.xz \
+              "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
 
           wget --tries=3 --timeout=30 \
             https://musl.libc.org/releases/musl-1.2.1.tar.gz
@@ -127,7 +118,8 @@ jobs:
           set -euo pipefail
           sudo mkdir -p /opt
 
-          # aarch64 (Linaro 7.4.1 dead; use 7.2.1 from Armbian mirror and rename)
+          # aarch64 (Linaro 7.4.1 dead since releases.linaro.org decomm;
+          # use 7.2.1 from Armbian mirror, rename to Ventoy's expected dir)
           wget --tries=3 --timeout=60 \
             https://mirrors.dotsrc.org/armbian-dl/_toolchain/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
           sudo tar xf gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz -C /opt/
@@ -141,13 +133,13 @@ jobs:
           sudo tar xf aarch64--uclibc--stable-2020.08-1.tar.bz2 -C /opt/
           rm aarch64--uclibc--stable-2020.08-1.tar.bz2
 
-          # MIPS loongson (correct: GitHub, per BuildVentoyFromSource.txt [9])
+          # MIPS loongson (per BuildVentoyFromSource.txt [9])
           wget --tries=3 --timeout=60 \
             https://github.com/ventoy/vtoytoolchain/releases/download/1.0/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
           sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
           rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
 
-          # mips64el musl (correct: GitHub, per BuildVentoyFromSource.txt [10])
+          # mips64el musl (per BuildVentoyFromSource.txt [10])
           wget --tries=3 --timeout=60 \
             https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2
           sudo tar xf output.tar.bz2 -C /opt/
@@ -164,6 +156,7 @@ jobs:
       - name: Build and install musl libc
         working-directory: ./ventoy_source
         run: |
+          set -euo pipefail
           cd DOC
           tar xf musl-1.2.1.tar.gz
           cd musl-1.2.1
@@ -175,21 +168,42 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Fix hardcoded path in buildgrub.sh
+          # === Fix hardcoded path in buildgrub.sh ===
           sed 's|/home/share/Ventoy/GRUB2/INSTALL|'"$PWD"'/GRUB2/INSTALL|g' \
             -i GRUB2/buildgrub.sh
 
-          # Disable -Werror for newer GCC compatibility
+          # === Allow GRUB2 to compile with newer GCC ===
           sed 's/configure/configure --disable-werror/g' \
             -i GRUB2/buildgrub.sh
 
+          # === Fix grub-mknetdir call in install.sh ===
+          sed 's|grub-mknetdir|if [ "$1" = "uefi" ]; then wpath="x86_64-efi"; elif [ "$1" = "i386efi" ]; then wpath="i386-efi"; else wpath="i386-pc"; fi; grub-mknetdir --directory "$VT_DIR/GRUB2/INSTALL/lib/grub/$wpath"|' \
+            -i GRUB2/MOD_SRC/grub-2.04/install.sh
+
+          # === Fix EDK2 32-bit build ===
+          sed 's/GCC48/GCC5/g' -i EDK2/build.sh
+          sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/build.sh
+          sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/buildedk.sh
+          sed 's|sh \./b|./b|g' -i EDK2/buildedk.sh
+
+          # === Make all scripts executable ===
+          find . -name "*.sh" -exec chmod +x {} \;
+
+          # === Fix bitwise typedef in linux/fs.h ===
+          sudo sed 's/int __bitwise/int __bitwise;\ntypedef int/' \
+            -i /usr/include/linux/fs.h
+
+          # === Create /cow directory for i386-pc image build ===
+          sudo mkdir -p /cow
+
+          # === Set PATH for cross toolchains ===
           export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/aarch64--uclibc--stable-2020.08-1/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
 
           cd INSTALL
           sudo sh all_in_one.sh CI || {
             echo "=== BUILD FAILED ==="
-            echo "=== Last 100 lines of build.log ==="
-            tail -100 ../DOC/build.log
+            echo "=== Last 200 lines of build.log ==="
+            tail -200 ../DOC/build.log
             exit 1
           }
 

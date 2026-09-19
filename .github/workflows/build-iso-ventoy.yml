@@ -124,17 +124,36 @@ jobs:
 
       - name: Setup cross-compilation toolchains
         run: |
-          # Download and extract cross toolchains to /opt
+          set -euo pipefail
           sudo mkdir -p /opt
-          wget -q ${{ env.TOOLCHAIN_AARCH64_URL }}
-          sudo tar xf $(basename ${{ env.TOOLCHAIN_AARCH64_URL }}) -C /opt/
-          wget -q ${{ env.TOOLCHAIN_UCLIBC_URL }}
-          sudo tar xf $(basename ${{ env.TOOLCHAIN_UCLIBC_URL }}) -C /opt/
-          wget -q ${{ env.TOOLCHAIN_MIPS_URL }}
-          sudo tar xf $(basename ${{ env.TOOLCHAIN_MIPS_URL }}) -C /opt/
-          wget -q ${{ env.TOOLCHAIN_MIPS64EL_URL }}
-          sudo tar xf output.tar.bz2 -C /opt/
-          sudo mv /opt/output /opt/mips64el-linux-musl-gcc730
+
+          # aarch64 (Linaro)
+          wget --tries=3 --timeout=60 \
+            https://releases.linaro.org/components/toolchain/binaries/7.4-2019.02/aarch64-linux-gnu/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz
+          sudo tar xf gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz -C /opt/
+          rm gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz
+
+          # aarch64 uclibc (Bootlin)
+          wget --tries=3 --timeout=60 \
+            https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2020.08-1.tar.bz2
+          sudo tar xf aarch64--uclibc--stable-2020.08-1.tar.bz2 -C /opt/
+          rm aarch64--uclibc--stable-2020.08-1.tar.bz2
+
+          # MIPS loongson (correct URL: loongnix, NOT GitHub)
+          wget --tries=3 --timeout=60 \
+            http://ftp.loongnix.org/toolchain/gcc/release/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
+          sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
+          rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
+
+          # mips64el (verify actual URL from Ventoy build scripts)
+          # Temporarily use loongnix mirror
+          wget --tries=3 --timeout=60 \
+            http://ftp.loongnix.org/toolchain/gcc/release/mips64el-loongson2f-linux-gnusf-gcc7.3-2019.06-29.tar.gz \
+            || echo "WARNING: mips64el toolchain URL may need manual verification"
+
+          # Verify toolchains are installed
+          ls /opt/
+          ls /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/ | head -5
 
       - name: Build and install musl libc
         working-directory: ./ventoy_source

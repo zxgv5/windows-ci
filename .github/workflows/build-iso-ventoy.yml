@@ -127,33 +127,39 @@ jobs:
           set -euo pipefail
           sudo mkdir -p /opt
 
-          # aarch64 (Linaro 7.4.1 is dead; use 7.2.1 from Armbian mirror and rename)
+          # aarch64 (Linaro 7.4.1 dead; use 7.2.1 from Armbian mirror and rename)
           wget --tries=3 --timeout=60 \
             https://mirrors.dotsrc.org/armbian-dl/_toolchain/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
           sudo tar xf gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz -C /opt/
-          # Rename to match Ventoy's expected path
           sudo mv /opt/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu \
                   /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu
           rm gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
 
-          # aarch64 uclibc (Bootlin, still alive)
+          # aarch64 uclibc (Bootlin)
           wget --tries=3 --timeout=60 \
             https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2020.08-1.tar.bz2
           sudo tar xf aarch64--uclibc--stable-2020.08-1.tar.bz2 -C /opt/
           rm aarch64--uclibc--stable-2020.08-1.tar.bz2
 
-          # MIPS loongson (correct URL per vtoytoolchain release notes)
-          wget --tries=5 --timeout=120 \
-            http://ftp.loongnix.org/toolchain/gcc/release/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
+          # MIPS loongson (correct: GitHub, per BuildVentoyFromSource.txt [9])
+          wget --tries=3 --timeout=60 \
+            https://github.com/ventoy/vtoytoolchain/releases/download/1.0/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
           sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
           rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
 
-          # Verify toolchains are installed and binaries exist
-          echo "=== /opt contents ==="
-          ls -la /opt/
-          echo "=== aarch64-linux-gnu-gcc exists? ==="
+          # mips64el musl (correct: GitHub, per BuildVentoyFromSource.txt [10])
+          wget --tries=3 --timeout=60 \
+            https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2
+          sudo tar xf output.tar.bz2 -C /opt/
+          sudo mv /opt/output /opt/mips64el-linux-musl-gcc730
+          rm output.tar.bz2
+
+          # Verify
+          ls /opt/
           test -x /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc \
-            && echo "YES" || echo "NO - check directory name"
+            && echo "aarch64 OK"
+          test -x /opt/mips64el-linux-musl-gcc730/bin/mips64el-linux-musl-gcc \
+            && echo "mips64el OK"
 
       - name: Build and install musl libc
         working-directory: ./ventoy_source

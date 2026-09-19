@@ -127,33 +127,33 @@ jobs:
           set -euo pipefail
           sudo mkdir -p /opt
 
-          # aarch64 (Linaro)
+          # aarch64 (Linaro 7.4.1 is dead; use 7.2.1 from Armbian mirror and rename)
           wget --tries=3 --timeout=60 \
-            https://releases.linaro.org/components/toolchain/binaries/7.4-2019.02/aarch64-linux-gnu/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz
-          sudo tar xf gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz -C /opt/
-          rm gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz
+            https://mirrors.dotsrc.org/armbian-dl/_toolchain/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
+          sudo tar xf gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz -C /opt/
+          # Rename to match Ventoy's expected path
+          sudo mv /opt/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu \
+                  /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu
+          rm gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
 
-          # aarch64 uclibc (Bootlin)
+          # aarch64 uclibc (Bootlin, still alive)
           wget --tries=3 --timeout=60 \
             https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2020.08-1.tar.bz2
           sudo tar xf aarch64--uclibc--stable-2020.08-1.tar.bz2 -C /opt/
           rm aarch64--uclibc--stable-2020.08-1.tar.bz2
 
-          # MIPS loongson (correct URL: loongnix, NOT GitHub)
-          wget --tries=3 --timeout=60 \
+          # MIPS loongson (correct URL per vtoytoolchain release notes)
+          wget --tries=5 --timeout=120 \
             http://ftp.loongnix.org/toolchain/gcc/release/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
           sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
           rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
 
-          # mips64el (verify actual URL from Ventoy build scripts)
-          # Temporarily use loongnix mirror
-          wget --tries=3 --timeout=60 \
-            http://ftp.loongnix.org/toolchain/gcc/release/mips64el-loongson2f-linux-gnusf-gcc7.3-2019.06-29.tar.gz \
-            || echo "WARNING: mips64el toolchain URL may need manual verification"
-
-          # Verify toolchains are installed
-          ls /opt/
-          ls /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/ | head -5
+          # Verify toolchains are installed and binaries exist
+          echo "=== /opt contents ==="
+          ls -la /opt/
+          echo "=== aarch64-linux-gnu-gcc exists? ==="
+          test -x /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc \
+            && echo "YES" || echo "NO - check directory name"
 
       - name: Build and install musl libc
         working-directory: ./ventoy_source

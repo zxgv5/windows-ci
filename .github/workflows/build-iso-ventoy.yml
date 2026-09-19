@@ -1,0 +1,135 @@
+name: build-iso-ventoy
+
+on:
+  workflow_dispatch:
+
+env:
+  BUILD_DATE: ''
+  VENTOY_REF: 'master'
+  # Cross-compilation toolchains (downloaded to /opt/)
+  TOOLCHAIN_AARCH64_URL: 'https://releases.linaro.org/components/toolchain/binaries/7.4-2019.02/aarch64-linux-gnu/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz'
+  TOOLCHAIN_UCLIBC_URL: 'https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2020.08-1.tar.bz2'
+  TOOLCHAIN_MIPS_URL: 'https://github.com/ventoy/vtoytoolchain/releases/download/1.0/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz'
+  TOOLCHAIN_MIPS64EL_URL: 'https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2'
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
+
+      - name: Clean runner environment
+        run: |
+          sudo apt clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: Checkout source repo
+        uses: actions/checkout@main
+        with:
+          repository: ventoy/Ventoy
+          ref: ${{ env.VENTOY_REF }}
+          path: ventoy_source
+          fetch-depth: 0
+
+      - name: Checkout ci source repo
+        uses: actions/checkout@main
+        with:
+          path: ci_source
+
+      - name: Generate timestamp
+        run: |
+          echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+          echo "VENTOY_VERSION=$(date +%m%d%H%M)" >> $GITHUB_ENV
+
+      - name: Setup build environment
+        run: |
+          sudo apt update -y || true
+          sudo apt install -y --no-install-recommends \
+            build-essential gcc g++ g++-multilib gcc-multilib \
+            wget vim dos2unix rsync autoconf automake libtool \
+            gettext bison binutils flex libdevmapper-dev \
+            libfuse-dev libfreetype6-dev libxpm-dev libssl-dev \
+            zip nasm acpica-tools xorriso mtools \
+            sbsigntool libgnutls28-dev uuid-dev \
+            net-tools samba qemu-system-x86
+          # Verify essential tools
+          which losetup || sudo apt install -y mount
+          which hexdump || sudo apt install -y bsdmainutils
+
+      - name: Download third-party dependencies
+        working-directory: ./ventoy_source
+        run: |
+          cd DOC
+          # Download source archives
+          wget -q https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz
+          wget -q https://musl.libc.org/releases/musl-1.2.1.tar.gz
+          cd ../GRUB2
+          wget -q https://ftp.gnu.org/gnu/grub/grub-2.04.tar.xz
+          cd ../EDK2
+          wget -q https://codeload.github.com/tianocore/edk2/zip/edk2-stable201911 \
+            -O edk2-edk2-stable201911.zip
+          cd ../ExFAT
+          wget -q https://codeload.github.com/relan/exfat/zip/v1.3.0 \
+            -O exfat-1.3.0.zip
+          wget -q https://codeload.github.com/libfuse/libfuse/zip/fuse-2.9.9 \
+            -O libfuse-fuse-2.9.9.zip
+          cd ../LiveCD/ISO/EFI/boot
+          # TinyCore Linux files for LiveCD
+          wget -q http://www.tinycorelinux.net/11.x/x86_64/release/distribution_files/vmlinuz64
+          wget -q http://www.tinycorelinux.net/11.x/x86_64/release/distribution_files/corepure64.gz
+          wget -q http://www.tinycorelinux.net/11.x/x86_64/release/distribution_files/modules64.gz
+
+      - name: Setup cross-compilation toolchains
+        run: |
+          # Download and extract cross toolchains to /opt
+          sudo mkdir -p /opt
+          wget -q ${{ env.TOOLCHAIN_AARCH64_URL }}
+          sudo tar xf $(basename ${{ env.TOOLCHAIN_AARCH64_URL }}) -C /opt/
+          wget -q ${{ env.TOOLCHAIN_UCLIBC_URL }}
+          sudo tar xf $(basename ${{ env.TOOLCHAIN_UCLIBC_URL }}) -C /opt/
+          wget -q ${{ env.TOOLCHAIN_MIPS_URL }}
+          sudo tar xf $(basename ${{ env.TOOLCHAIN_MIPS_URL }}) -C /opt/
+          wget -q ${{ env.TOOLCHAIN_MIPS64EL_URL }}
+          sudo tar xf output.tar.bz2 -C /opt/
+          sudo mv /opt/output /opt/mips64el-linux-musl-gcc730
+
+      - name: Build and install musl libc
+        working-directory: ./ventoy_source
+        run: |
+          cd DOC
+          tar xf musl-1.2.1.tar.gz
+          cd musl-1.2.1
+          ./configure
+          sudo make install
+
+      - name: Build Ventoy LiveCD ISO
+        working-directory: ./ventoy_source
+        run: |
+          export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/aarch64--uclibc--stable-2020.08-1/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
+          cd INSTALL
+          sudo sh all_in_one.sh CI
+
+      - name: List generated files
+        working-directory: ./ventoy_source
+        run: |
+          echo "Listing all output files generated:"
+          find INSTALL -type f \( -name "*.iso" -o -name "*.tar.gz" -o -name "*.zip" \) | sort
+
+      - name: Rename and move
+        working-directory: ./ventoy_source
+        run: |
+          mkdir -p "${{ github.workspace }}/dist"
+          mv INSTALL/ventoy-*-livecd.iso "${{ github.workspace }}/dist/ventoy-${{ env.BUILD_DATE }}.iso"
+
+      - name: Erase keystore, encrypt package and create release
+        uses: ./ci_source/.github/actions/erase_aes256pac_release/
+        with:
+          P12_KEYSTORE_PATH: ""
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          BUILD_ARTIFACT_PATH: "./dist/ventoy-${{ env.BUILD_DATE }}.iso"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-ventoy"

@@ -177,13 +177,18 @@ jobs:
             -i GRUB2/buildgrub.sh
 
           # === Fix automake version mismatch (aclocal-1.15 vs 1.16) ===
-          # Create symlink for backward compatibility
           sudo ln -sf /usr/bin/aclocal /usr/bin/aclocal-1.15 2>/dev/null || true
           sudo ln -sf /usr/bin/automake /usr/bin/automake-1.15 2>/dev/null || true
-
-          # Touch autotools files after autogen.sh to prevent make from
-          # trying to regenerate aclocal.m4 with nonexistent aclocal-1.15
           sed 's|\./autogen\.sh|./autogen.sh \&\& touch aclocal.m4 configure Makefile.in config.h.in|g' \
+            -i GRUB2/buildgrub.sh
+
+          # === Fix grub-2.04 parallel build race (libgrub.pp vs config-util.h) ===
+          # libgrub.pp is built with -DGRUB_UTIL=1 and includes config-util.h,
+          # but with make -j16 a parallel job generates it too late.
+          # Fix: explicitly generate config-util.h via config.status BEFORE
+          # each parallel make (equivalent to Red Hat's Makefile.am patch:
+          # "Make libgrub.pp depend on config-util.h")
+          sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& make -j 16 |' \
             -i GRUB2/buildgrub.sh
 
           # === Fix grub-mknetdir call in install.sh ===

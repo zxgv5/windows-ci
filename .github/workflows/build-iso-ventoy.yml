@@ -1,13 +1,13 @@
 name: build-iso-ventoy
-
+ 
 on:
   workflow_dispatch:
-
+ 
 env:
   BUILD_DATE: ''
   VENTOY_REF: 'master'
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+ 
 jobs:
   build:
     # ubuntu-22.04: gcc-7 unavailable on 24.04, GRUB2 needs older GCC era toolchain
@@ -17,13 +17,13 @@ jobs:
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 10
-
+ 
       - name: Clean runner environment
         run: |
           sudo apt clean
           sudo rm -rf /var/lib/apt/lists/*
           df -h
-
+ 
       - name: Checkout source repo
         uses: actions/checkout@main
         with:
@@ -31,17 +31,17 @@ jobs:
           ref: ${{ env.VENTOY_REF }}
           path: ventoy_source
           fetch-depth: 0
-
+ 
       - name: Checkout ci source repo
         uses: actions/checkout@main
         with:
           path: ci_source
-
+ 
       - name: Generate timestamp
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
           echo "VENTOY_VERSION=$(date +%m%d%H%M)" >> $GITHUB_ENV
-
+ 
       - name: Setup build environment
         run: |
           sudo apt update -y || true
@@ -54,31 +54,31 @@ jobs:
             libfreetype6-dev libxpm-dev libssl-dev \
             zip nasm acpica-tools xorriso mtools \
             sbsigntool libgnutls28-dev uuid-dev bsdmainutils
-
+ 
       - name: Download third-party dependencies
         working-directory: ./ventoy_source
         run: |
           set -euo pipefail
-
+ 
           cd DOC
           # dietlibc: prefer fefe.de, fallback to Debian mirror
           wget --tries=3 --timeout=30 \
             https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz \
             || wget --tries=3 --timeout=30 -O dietlibc-0.34.tar.xz \
               "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
-
+ 
           wget --tries=3 --timeout=30 \
             https://musl.libc.org/releases/musl-1.2.1.tar.gz
-
+ 
           cd ../GRUB2
           wget --tries=3 --timeout=30 \
             https://ftp.gnu.org/gnu/grub/grub-2.04.tar.xz
-
+ 
           cd ../EDK2
           wget --tries=3 --timeout=30 \
             https://codeload.github.com/tianocore/edk2/zip/edk2-stable201911 \
             -O edk2-edk2-stable201911.zip
-
+ 
           cd ../ExFAT
           wget --tries=3 --timeout=30 \
             https://codeload.github.com/relan/exfat/zip/v1.3.0 \
@@ -86,13 +86,13 @@ jobs:
           wget --tries=3 --timeout=30 \
             https://codeload.github.com/libfuse/libfuse/zip/fuse-2.9.9 \
             -O libfuse-fuse-2.9.9.zip
-
+ 
           cd ../LiveCD/ISO/EFI/boot
           for f in vmlinuz64 corepure64.gz modules64.gz; do
             wget --tries=3 --timeout=30 \
               "http://www.tinycorelinux.net/11.x/x86_64/release/distribution_files/$f"
           done
-
+ 
           # Verify all expected files exist and are non-empty
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
@@ -112,12 +112,12 @@ jobs:
             fi
           done
           echo "All dependencies downloaded successfully"
-
+ 
       - name: Setup cross-compilation toolchains
         run: |
           set -euo pipefail
           sudo mkdir -p /opt
-
+ 
           # aarch64 (Linaro 7.4.1 dead since releases.linaro.org decomm;
           # use 7.2.1 from Armbian mirror, rename to Ventoy's expected dir)
           wget --tries=3 --timeout=60 \
@@ -126,33 +126,33 @@ jobs:
           sudo mv /opt/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu \
                   /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu
           rm gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
-
+ 
           # aarch64 uclibc (Bootlin)
           wget --tries=3 --timeout=60 \
             https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2020.08-1.tar.bz2
           sudo tar xf aarch64--uclibc--stable-2020.08-1.tar.bz2 -C /opt/
           rm aarch64--uclibc--stable-2020.08-1.tar.bz2
-
+ 
           # MIPS loongson (per BuildVentoyFromSource.txt [9])
           wget --tries=3 --timeout=60 \
             https://github.com/ventoy/vtoytoolchain/releases/download/1.0/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
           sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
           rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
-
+ 
           # mips64el musl (per BuildVentoyFromSource.txt [10])
           wget --tries=3 --timeout=60 \
             https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2
           sudo tar xf output.tar.bz2 -C /opt/
           sudo mv /opt/output /opt/mips64el-linux-musl-gcc730
           rm output.tar.bz2
-
+ 
           # Verify
           ls /opt/
           test -x /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc \
             && echo "aarch64 OK"
           test -x /opt/mips64el-linux-musl-gcc730/bin/mips64el-linux-musl-gcc \
             && echo "mips64el OK"
-
+ 
       - name: Build and install musl libc
         working-directory: ./ventoy_source
         run: |
@@ -162,7 +162,7 @@ jobs:
           cd musl-1.2.1
           ./configure
           sudo make install
-
+ 
       - name: Build Ventoy LiveCD ISO
         working-directory: ./ventoy_source
         run: |
@@ -174,6 +174,16 @@ jobs:
 
           # === Allow GRUB2 to compile with newer GCC ===
           sed 's/configure/configure --disable-werror/g' \
+            -i GRUB2/buildgrub.sh
+
+          # === Fix automake version mismatch (aclocal-1.15 vs 1.16) ===
+          # Create symlink for backward compatibility
+          sudo ln -sf /usr/bin/aclocal /usr/bin/aclocal-1.15 2>/dev/null || true
+          sudo ln -sf /usr/bin/automake /usr/bin/automake-1.15 2>/dev/null || true
+
+          # Touch autotools files after autogen.sh to prevent make from
+          # trying to regenerate aclocal.m4 with nonexistent aclocal-1.15
+          sed 's|\./autogen\.sh|./autogen.sh \&\& touch aclocal.m4 configure Makefile.in config.h.in|g' \
             -i GRUB2/buildgrub.sh
 
           # === Fix grub-mknetdir call in install.sh ===
@@ -206,19 +216,19 @@ jobs:
             tail -200 ../DOC/build.log
             exit 1
           }
-
+ 
       - name: List generated files
         working-directory: ./ventoy_source
         run: |
           echo "Listing all output files generated:"
           find INSTALL -type f \( -name "*.iso" -o -name "*.tar.gz" -o -name "*.zip" \) | sort
-
+ 
       - name: Rename and move
         working-directory: ./ventoy_source
         run: |
           mkdir -p "${{ github.workspace }}/dist"
           mv INSTALL/ventoy-*-livecd.iso "${{ github.workspace }}/dist/ventoy-${{ env.BUILD_DATE }}.iso"
-
+ 
       - name: Erase keystore, encrypt package and create release
         uses: ./ci_source/.github/actions/erase_aes256pac_release/
         with:

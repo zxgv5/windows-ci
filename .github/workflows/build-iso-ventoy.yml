@@ -54,12 +54,19 @@ jobs:
             libfreetype6-dev libxpm-dev libssl-dev \
             zip nasm acpica-tools xorriso mtools \
             sbsigntool libgnutls28-dev uuid-dev bsdmainutils
+
       - name: Register ucs-2 codec shim for EDK2
         run: |
-          printf 'import codecs\ndef _ventoy_ucs2_search(name):\n    if name == "ucs-2":\n        return codecs.lookup("utf-16")\n    return None\ncodecs.register(_ventoy_ucs2_search)\n' | sudo tee /usr/lib/python3/dist-packages/sitecustomize.py > /dev/null
-          # Verify immediately: MUST print OK, else fail NOW with file contents shown
-          python3 -c "import codecs; codecs.lookup('ucs-2'); print('ucs-2 codec shim OK')" \
-            || { echo "FATAL: shim not active"; sudo cat /usr/lib/python3/dist-packages/sitecustomize.py; exit 1; }
+          # Install shim into EVERY python3 on the runner (PATH python = toolcache,
+          # /usr/bin/python3 = apt python used by EDK2). Verify each one.
+          for PY in /usr/bin/python3 "$(command -v python3)"; do
+            [ -x "$PY" ] || continue
+            SITE="$("$PY" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")"
+            printf 'import codecs\ndef _ventoy_ucs2_search(name):\n    if name == "ucs-2":\n        return codecs.lookup("utf-16")\n    return None\ncodecs.register(_ventoy_ucs2_search)\n' | sudo tee "$SITE/sitecustomize.py" > /dev/null
+            echo "--- $PY (site: $SITE) ---"
+            "$PY" -c "import codecs; codecs.lookup('ucs-2'); print('ucs-2 codec shim OK')" \
+              || { echo "FATAL: shim not active for $PY"; exit 1; }
+          done
 
       - name: Download third-party dependencies
         working-directory: ./ventoy_source
@@ -192,10 +199,9 @@ jobs:
           sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& make -j 16 |' \
             -i GRUB2/buildgrub.sh
 
-          # === Fix EDK2 BaseTools -Werror with GCC 11 (-Wvla-parameter in Brotli) ===
-          # buildedk.sh re-extracts the zip every run, so inject the patch INTO
-          # the script: strip -Werror from header.makefile right after the overlay copy
-          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile|' \
+          # === Fix EDK2 BaseTools -Werror + ucs-2 codec (injected into buildedk.sh,
+          # which re-extracts the zip every run) ===
+          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\ngrep -rl "ucs-2" edk2-edk2-stable201911/BaseTools/Source/Python | xargs -r sed -i "s/ucs-2/utf-16/g"|' \
             -i EDK2/buildedk.sh
 
           # === Fix grub-mknetdir call in install.sh ===

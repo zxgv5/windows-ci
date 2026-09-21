@@ -54,6 +54,18 @@ jobs:
             libfreetype6-dev libxpm-dev libssl-dev \
             zip nasm acpica-tools xorriso mtools \
             sbsigntool libgnutls28-dev uuid-dev bsdmainutils
+          # === Register legacy 'ucs-2' codec alias for EDK2 build on Python 3.10+ ===
+          sudo tee -a /usr/lib/python3/dist-packages/sitecustomize.py > /dev/null <<'EOF'
+# Ventoy CI shim: EDK2 build calls codecs.lookup('ucs-2') which Python 3.10 removed
+import codecs
+def _ventoy_ucs2_search(name):
+    if name == 'ucs-2':
+        return codecs.lookup('utf-16')
+    return None
+codecs.register(_ventoy_ucs2_search)
+EOF
+          # Verify the shim works
+          python3 -c "import codecs; codecs.lookup('ucs-2'); print('ucs-2 codec shim OK')"
  
       - name: Download third-party dependencies
         working-directory: ./ventoy_source
@@ -183,13 +195,14 @@ jobs:
             -i GRUB2/buildgrub.sh
 
           # === Fix grub-2.04 parallel build race (libgrub.pp vs config-util.h) ===
-          # libgrub.pp is built with -DGRUB_UTIL=1 and includes config-util.h,
-          # but with make -j16 a parallel job generates it too late.
-          # Fix: explicitly generate config-util.h via config.status BEFORE
-          # each parallel make (equivalent to Red Hat's Makefile.am patch:
-          # "Make libgrub.pp depend on config-util.h")
           sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& make -j 16 |' \
             -i GRUB2/buildgrub.sh
+
+          # === Fix EDK2 BaseTools -Werror with GCC 11 (-Wvla-parameter in Brotli) ===
+          # buildedk.sh re-extracts the zip every run, so inject the patch INTO
+          # the script: strip -Werror from header.makefile right after the overlay copy
+          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile|' \
+            -i EDK2/buildedk.sh
 
           # === Fix grub-mknetdir call in install.sh ===
           sed 's|grub-mknetdir|if [ "$1" = "uefi" ]; then wpath="x86_64-efi"; elif [ "$1" = "i386efi" ]; then wpath="i386-efi"; else wpath="i386-pc"; fi; grub-mknetdir --directory "$VT_DIR/GRUB2/INSTALL/lib/grub/$wpath"|' \

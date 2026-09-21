@@ -59,10 +59,12 @@ jobs:
         run: |
           # Install shim into EVERY python3 on the runner (PATH python = toolcache,
           # /usr/bin/python3 = apt python used by EDK2). Verify each one.
+          # NOTE: codecs.lookup() passes the NORMALIZED name to search functions:
+          # 'ucs-2' -> 'ucs_2' (lowercase, hyphen/space -> underscore)
           for PY in /usr/bin/python3 "$(command -v python3)"; do
             [ -x "$PY" ] || continue
             SITE="$("$PY" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")"
-            printf 'import codecs\ndef _ventoy_ucs2_search(name):\n    if name == "ucs-2":\n        return codecs.lookup("utf-16")\n    return None\ncodecs.register(_ventoy_ucs2_search)\n' | sudo tee "$SITE/sitecustomize.py" > /dev/null
+            printf 'import codecs\ndef _ventoy_ucs2_search(name):\n    if name.replace("-", "_").replace(" ", "_").lower() in ("ucs_2", "ucs2"):\n        return codecs.lookup("utf-16")\n    return None\ncodecs.register(_ventoy_ucs2_search)\n' | sudo tee "$SITE/sitecustomize.py" > /dev/null
             echo "--- $PY (site: $SITE) ---"
             "$PY" -c "import codecs; codecs.lookup('ucs-2'); print('ucs-2 codec shim OK')" \
               || { echo "FATAL: shim not active for $PY"; exit 1; }

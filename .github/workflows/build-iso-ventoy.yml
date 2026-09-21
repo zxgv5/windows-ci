@@ -56,14 +56,13 @@ jobs:
             sbsigntool libgnutls28-dev uuid-dev bsdmainutils
           # === Register legacy 'ucs-2' codec alias for EDK2 build on Python 3.10+ ===
           sudo tee -a /usr/lib/python3/dist-packages/sitecustomize.py > /dev/null <<'EOF'
-# Ventoy CI shim: EDK2 build calls codecs.lookup('ucs-2') which Python 3.10 removed
-import codecs
-def _ventoy_ucs2_search(name):
-    if name == 'ucs-2':
-        return codecs.lookup('utf-16')
-    return None
-codecs.register(_ventoy_ucs2_search)
-EOF
+          import codecs
+          def _ventoy_ucs2_search(name):
+              if name == 'ucs-2':
+                  return codecs.lookup('utf-16')
+              return None
+          codecs.register(_ventoy_ucs2_search)
+          EOF
           # Verify the shim works
           python3 -c "import codecs; codecs.lookup('ucs-2'); print('ucs-2 codec shim OK')"
  

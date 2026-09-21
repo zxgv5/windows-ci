@@ -195,9 +195,14 @@ jobs:
           sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& sed -i "s/^libgrub\\.pp: /libgrub.pp: config-util.h /" Makefile \&\& make -j 16 |' \
             -i GRUB2/buildgrub.sh
 
-          # === Fix EDK2 BaseTools -Werror + ucs-2 codec (injected into buildedk.sh,
-          # which re-extracts the zip every run; deterministic source-level fix) ===
-          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"|' \
+          # === Fix EDK2 BaseTools -Werror + MODULE -Werror + ucs-2 codec ===
+          # (injected into buildedk.sh, which re-extracts the zip every run)
+          # 1. BaseTools C: strip -Werror (BrotliCompress -Wvla-parameter, GCC11)
+          # 2. MODULE flags: strip -Werror from tools_def.template — module builds
+          #    use GCC5 toolchain flags from here, and BrotliCustomDecompressLib
+          #    contains its OWN copy of brotli hitting the same -Wvla-parameter
+          # 3. ucs-2 -> utf-16 in Python sources
+          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\nsed -i "s/ -Werror / /g" edk2-edk2-stable201911/BaseTools/Conf/tools_def.template\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"|' \
             -i EDK2/buildedk.sh
 
           # === Fix grub-mknetdir call in install.sh ===
@@ -228,6 +233,10 @@ jobs:
             echo "=== BUILD FAILED ==="
             echo "=== Last 200 lines of build.log ==="
             tail -200 ../DOC/build.log
+            echo "=== Compiler error lines (grep) ==="
+            grep -n "error:" ../DOC/build.log | tail -50 || true
+            echo "=== EDK2 build.py error lines ==="
+            grep -nE "error [A-Z]?[0-9]+:|: error:" ../DOC/build.log | tail -30 || true
             exit 1
           }
 

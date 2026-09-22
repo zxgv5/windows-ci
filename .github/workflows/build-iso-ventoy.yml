@@ -176,18 +176,22 @@ jobs:
           sed 's/configure/configure --disable-werror/g' \
             -i GRUB2/buildgrub.sh
 
+          # === Fix autopoint failure (gettext 0.21 vs grub-2.04 po/) ===
+          # autopoint fails -> autogen.sh aborts BEFORE aclocal/autoconf/automake
+          # finish -> Ventoy's module registration (Makefile.core.def edits) never
+          # reaches the generated Makefile -> linux.mod references ventoy_* symbols
+          # that no module defines -> genmoddep/moddep.lst fails.
+          # Form-agnostic fix injected right AFTER the shebang of buildgrub.sh:
+          #   1. PATH shim dir with a no-op 'autopoint' (covers DIRECT calls inside
+          #      grub's autogen.sh, which ignore the AUTOPOINT env var)
+          #   2. export AUTOPOINT=true (covers autoreconf-driven autopoint)
+          sed '1a mkdir -p /tmp/noautopoint && printf "#!/bin/sh\\nexit 0\\n" > /tmp/noautopoint/autopoint && chmod +x /tmp/noautopoint/autopoint && export PATH=/tmp/noautopoint:$PATH && export AUTOPOINT=true' \
+            -i GRUB2/buildgrub.sh
+
           # === Fix automake version mismatch + autogen timestamp cascade ===
-          # autopoint (gettext 0.21 vs grub-2.04 po/) fails -> autogen.sh aborts
-          # -> config*.h.in stay stale -> mid-make the 'missing autoheader' rule
-          # fires, touches config-util.h.in, makes stamp-h1 stale, and the
-          # rm/rebuild window races other targets under -j16.
-          # Touch MUST run regardless of autogen result ('; ' not '&&'), and MUST
-          # include both .in files (newest = autoheader rule never fires).
-          # NOTE: pattern matches 'autogen.sh' in ANY invocation form
-          # (./autogen.sh / sh autogen.sh / bash autogen.sh).
           sudo ln -sf /usr/bin/aclocal /usr/bin/aclocal-1.15 2>/dev/null || true
           sudo ln -sf /usr/bin/automake /usr/bin/automake-1.15 2>/dev/null || true
-          sed 's|autogen\.sh|autogen.sh \|\| true; touch aclocal.m4 configure Makefile.in config.h.in config-util.h.in|g' \
+          sed 's|\./autogen\.sh|./autogen.sh \|\| true; touch aclocal.m4 configure Makefile.in config.h.in config-util.h.in|g' \
             -i GRUB2/buildgrub.sh
 
           # === Fix grub-2.04 parallel build race + squash4 zstd include ===
@@ -195,7 +199,6 @@ jobs:
           #   1. ./config.status config-util.h — pre-generate it synchronously
           #   2. touch stamp-h1 — make it newest so the rm/rebuild rule never fires
           #   3. sed Makefile: libgrub.pp depends on config-util.h
-          #      (equivalent of Red Hat's upstream Makefile.am patch)
           #   4. sed squash4.c: resolve #include <zstd.h> to the BUNDLED copy at
           #      grub-core/lib/zstd/zstd.h — immune to -nostdinc, missing
           #      libzstd-dev, and runner image drift
@@ -247,8 +250,12 @@ jobs:
             grep -n -B6 "fatal error" ../DOC/build.log | tail -120 || true
             echo "=== linker errors ==="
             grep -nE "undefined reference|cannot find -l|No rule to make target" ../DOC/build.log | tail -30 || true
+            echo "=== undefined-symbol / moddep errors ==="
+            grep -n "is not defined\|moddep" ../DOC/build.log | tail -30 || true
             echo "=== Platform markers ==="
             grep -n "Platform: " ../DOC/build.log || true
+            echo "=== buildgrub.sh as patched by CI (first 60 lines) ==="
+            head -60 ../GRUB2/buildgrub.sh || true
             exit 1
           }
 

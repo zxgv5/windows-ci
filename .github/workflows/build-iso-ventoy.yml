@@ -190,23 +190,30 @@ jobs:
           sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& touch stamp-h1 \&\& sed -i "s/^libgrub\\.pp: /libgrub.pp: config-util.h /" Makefile \&\& sed -i "s@#include <zstd.h>@#include \\"../lib/zstd/zstd.h\\"@" grub-core/fs/squash4.c \&\& make -j 16 |' \
             -i GRUB2/buildgrub.sh
 
-          # === Fix EDK2 BaseTools -Werror + MODULE -Werror + ucs-2 codec ===
-          # 1. BaseTools C: strip -Werror (header.makefile)
-          # 2. MODULE flags: strip -Werror from tools_def.template — now matches
-          #    BOTH mid-line (" -Werror ") and end-of-line (" -Werror$") forms
+          # === Fix EDK2: -Werror + ucs-2 codec + Python 3.10 array API ===
+          # (injected into buildedk.sh, which re-extracts the zip every run)
+          # 1. BaseTools C: strip -Werror (BrotliCompress -Wvla-parameter, GCC11)
+          # 2. MODULE flags: strip -Werror from tools_def.template (mid-line AND
+          #    end-of-line forms) — BrotliCustomDecompressLib's own brotli copy
           # 3. ucs-2 -> utf-16 in Python sources
-          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\nsed -i "s/ -Werror / /g; s/ -Werror$//" edk2-edk2-stable201911/BaseTools/Conf/tools_def.template\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"|' \
+          # 4. tostring()/fromstring() -> tobytes()/frombytes() — removed in
+          #    Python 3.9; crashes CreateAsBuiltInf/PeImageClass (Misc.py)
+          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\nsed -i "s/ -Werror / /g; s/ -Werror$//" edk2-edk2-stable201911/BaseTools/Conf/tools_def.template\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"\ngrep -rlI -e "tostring()" -e "fromstring(" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/\.tostring()/\.tobytes()/g; s/\.fromstring(/\.frombytes(/g"|' \
             -i EDK2/buildedk.sh
 
           # === Fix grub-mknetdir call in install.sh ===
           sed 's|grub-mknetdir|if [ "$1" = "uefi" ]; then wpath="x86_64-efi"; elif [ "$1" = "i386efi" ]; then wpath="i386-efi"; else wpath="i386-pc"; fi; grub-mknetdir --directory "$VT_DIR/GRUB2/INSTALL/lib/grub/$wpath"|' \
             -i GRUB2/MOD_SRC/grub-2.04/install.sh
 
-          # === Fix EDK2 32-bit build ===
+          # === Fix EDK2 shell scripts: dash -> bash (source/build builtins) ===
           sed 's/GCC48/GCC5/g' -i EDK2/build.sh
           sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/build.sh
           sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/buildedk.sh
           sed 's|sh \./b|./b|g' -i EDK2/buildedk.sh
+          # build_shim.sh runs under dash via #!/bin/sh shebang: 'source' (line 29)
+          # and 'build' (line 36, needs edksetup.sh sourced first) both fail.
+          sed '1s|#!/bin/sh|#!/bin/bash|' -i EDK2/build_shim.sh 2>/dev/null || \
+            sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/build_shim.sh || true
 
           # === Make all scripts executable ===
           find . -name "*.sh" -exec chmod +x {} \;

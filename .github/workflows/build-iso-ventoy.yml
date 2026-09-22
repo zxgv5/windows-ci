@@ -191,7 +191,11 @@ jobs:
             -i GRUB2/buildgrub.sh
 
           # === Fix EDK2 BaseTools -Werror + MODULE -Werror + ucs-2 codec ===
-          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\nsed -i "s/ -Werror / /g" edk2-edk2-stable201911/BaseTools/Conf/tools_def.template\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"|' \
+          # 1. BaseTools C: strip -Werror (header.makefile)
+          # 2. MODULE flags: strip -Werror from tools_def.template — now matches
+          #    BOTH mid-line (" -Werror ") and end-of-line (" -Werror$") forms
+          # 3. ucs-2 -> utf-16 in Python sources
+          sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\nsed -i "s/ -Werror / /g; s/ -Werror$//" edk2-edk2-stable201911/BaseTools/Conf/tools_def.template\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"|' \
             -i EDK2/buildedk.sh
 
           # === Fix grub-mknetdir call in install.sh ===
@@ -222,17 +226,16 @@ jobs:
             echo "=== BUILD FAILED ==="
             echo "=== Total lines in build.log ==="
             wc -l ../DOC/build.log
-            echo "=== ALL make error lines (full log, numbered) ==="
-            grep -n "\*\*\*" ../DOC/build.log | head -100 || true
-            grep -n "Error [0-9]" ../DOC/build.log | head -100 || true
-            echo "=== All fatal error lines with 8-line context ==="
-            grep -n -B8 "fatal error" ../DOC/build.log | tail -200 || true
+            echo "=== ALL error lines (case-insensitive, capped at 150) ==="
+            grep -inE "error [0-9]+:|: error|fatal error|failed" ../DOC/build.log | head -150 || true
+            echo "=== fatal errors with 10-line context ==="
+            grep -n -B10 "fatal error" ../DOC/build.log | tail -250 || true
             echo "=== undefined symbols / moddep ==="
             grep -n "is not defined\|moddep\|syminfo\|genmoddep" ../DOC/build.log | tail -40 || true
-            echo "=== Platform + stage markers ==="
-            grep -n "Platform: \|build grub2 for\|build edk2\|build ipxe\|prepare_env\|build mkernel\|build vtoytool\|Build Ventoy\|build exfat" ../DOC/build.log || true
-            echo "=== buildgrub.sh lines 60-130 (mips + i386-pc platforms) ==="
-            sed -n '60,130p' ../GRUB2/buildgrub.sh || true
+            echo "=== Stage markers in build.log ==="
+            grep -n "========\|Platform: " ../DOC/build.log || true
+            echo "=== Last 150 lines of build.log (RAW TAIL) ==="
+            tail -150 ../DOC/build.log
             exit 1
           }
 

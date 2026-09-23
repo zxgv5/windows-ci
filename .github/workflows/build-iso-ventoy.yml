@@ -66,10 +66,22 @@ jobs:
 
           cd DOC
           # dietlibc: prefer fefe.de, fallback to Debian mirror
-          wget --tries=3 --timeout=30 \
-            https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz \
-            || wget --tries=3 --timeout=30 -O dietlibc-0.34.tar.xz \
-              "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
+          # dietlibc: prefer fefe.de, fallback to Debian mirror.
+          # Debian never packaged 0.35 (sid still 0.34~cvs20160606-19), so the
+          # fallback yields 0.34 which lacks 0.35's SECURITY fixes (putenv,
+          # regex). If we must fall back, fail fast instead of building with
+          # known CVEs.
+          if wget --tries=3 --timeout=30 \
+            https://www.fefe.de/dietlibc/dietlibc-0.35.tar.xz; then
+            :
+          elif wget --tries=3 --timeout=30 \
+            https://fossies.org/linux/misc/old/dietlibc-0.35.tar.xz; then
+            :
+          else
+            echo "FATAL: all dietlibc-0.35 sources unreachable"
+            echo "Refusing to fall back to Debian's 0.34 (missing SECURITY fixes)"
+            exit 1
+          fi
 
           wget --tries=3 --timeout=30 \
             https://musl.libc.org/releases/musl-1.2.6.tar.gz
@@ -100,7 +112,7 @@ jobs:
           # Verify all expected files exist and are non-empty
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
-            DOC/dietlibc-0.34.tar.xz \
+            DOC/dietlibc-0.35.tar.xz \
             DOC/musl-1.2.6.tar.gz \
             GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \
@@ -130,13 +142,6 @@ jobs:
           sudo mv /opt/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu \
                   /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu
           rm gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
-
-          # aarch64 uclibc (Bootlin, current latest stable; was 2020.08)
-          # NOTE: 2024.05+ switched from .tar.bz2 to .tar.xz
-          wget --tries=3 --timeout=60 \
-            https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2025.08-1.tar.xz
-          sudo tar xf aarch64--uclibc--stable-2025.08-1.tar.xz -C /opt/
-          rm aarch64--uclibc--stable-2025.08-1.tar.xz
 
           # MIPS loongson (per BuildVentoyFromSource.txt [9])
           wget --tries=3 --timeout=60 \
@@ -243,7 +248,7 @@ jobs:
           sudo mkdir -p /cow
 
           # === Set PATH for cross toolchains ===
-          export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/aarch64--uclibc--stable-2020.08-1/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
+          export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
 
           cd INSTALL
           sudo sh all_in_one.sh CI || {

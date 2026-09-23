@@ -72,7 +72,7 @@ jobs:
               "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
 
           wget --tries=3 --timeout=30 \
-            https://musl.libc.org/releases/musl-1.2.5.tar.gz
+            https://musl.libc.org/releases/musl-1.2.6.tar.gz
 
           cd ../GRUB2
           wget --tries=3 --timeout=30 \
@@ -101,7 +101,7 @@ jobs:
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
             DOC/dietlibc-0.34.tar.xz \
-            DOC/musl-1.2.5.tar.gz \
+            DOC/musl-1.2.6.tar.gz \
             GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \
             ExFAT/exfat-1.3.0.zip \
@@ -163,8 +163,8 @@ jobs:
         run: |
           set -euo pipefail
           cd DOC
-          tar xf musl-1.2.5.tar.gz
-          cd musl-1.2.5
+          tar xf musl-1.2.6.tar.gz
+          cd musl-1.2.6
           ./configure
           sudo make install
 

@@ -1,13 +1,13 @@
 name: build-iso-ventoy
-
+ 
 on:
   workflow_dispatch:
-
+ 
 env:
   BUILD_DATE: ''
   VENTOY_REF: 'master'
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+ 
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,13 +16,13 @@ jobs:
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 10
-
+ 
       - name: Clean runner environment
         run: |
           sudo apt clean
           sudo rm -rf /var/lib/apt/lists/*
           df -h
-
+ 
       - name: Checkout source repo
         uses: actions/checkout@main
         with:
@@ -30,17 +30,17 @@ jobs:
           ref: ${{ env.VENTOY_REF }}
           path: ventoy_source
           fetch-depth: 0
-
+ 
       - name: Checkout ci source repo
         uses: actions/checkout@main
         with:
           path: ci_source
-
+ 
       - name: Generate timestamp
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
           echo "VENTOY_VERSION=$(date +%m%d%H%M)" >> $GITHUB_ENV
-
+ 
       - name: Setup build environment
         run: |
           sudo apt update -y || true
@@ -58,43 +58,31 @@ jobs:
             zip nasm acpica-tools xorriso mtools \
             sbsigntool libgnutls28-dev uuid-dev \
             bsdmainutils bsdextrautils python3-setuptools
-
+ 
       - name: Download third-party dependencies
         working-directory: ./ventoy_source
         run: |
           set -euo pipefail
-
+ 
           cd DOC
           # dietlibc: prefer fefe.de, fallback to Debian mirror
-          # dietlibc: prefer fefe.de, fallback to Debian mirror.
-          # Debian never packaged 0.35 (sid still 0.34~cvs20160606-19), so the
-          # fallback yields 0.34 which lacks 0.35's SECURITY fixes (putenv,
-          # regex). If we must fall back, fail fast instead of building with
-          # known CVEs.
-          if wget --tries=3 --timeout=30 \
-            https://www.fefe.de/dietlibc/dietlibc-0.35.tar.xz; then
-            :
-          elif wget --tries=3 --timeout=30 \
-            https://fossies.org/linux/misc/old/dietlibc-0.35.tar.xz; then
-            :
-          else
-            echo "FATAL: all dietlibc-0.35 sources unreachable"
-            echo "Refusing to fall back to Debian's 0.34 (missing SECURITY fixes)"
-            exit 1
-          fi
-
+          wget --tries=3 --timeout=30 \
+            https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz \
+            || wget --tries=3 --timeout=30 -O dietlibc-0.34.tar.xz \
+              "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
+ 
           wget --tries=3 --timeout=30 \
             https://musl.libc.org/releases/musl-1.2.6.tar.gz
-
+ 
           cd ../GRUB2
           wget --tries=3 --timeout=30 \
             https://ftp.gnu.org/gnu/grub/grub-2.04.tar.xz
-
+ 
           cd ../EDK2
           wget --tries=3 --timeout=30 \
             https://codeload.github.com/tianocore/edk2/zip/edk2-stable201911 \
             -O edk2-edk2-stable201911.zip
-
+ 
           cd ../ExFAT
           wget --tries=3 --timeout=30 \
             https://codeload.github.com/relan/exfat/zip/v1.3.0 \
@@ -102,17 +90,17 @@ jobs:
           wget --tries=3 --timeout=30 \
             https://codeload.github.com/libfuse/libfuse/zip/fuse-2.9.9 \
             -O libfuse-fuse-2.9.9.zip
-
+ 
           cd ../LiveCD/ISO/EFI/boot
           for f in vmlinuz64 corepure64.gz modules64.gz; do
             wget --tries=3 --timeout=30 \
               "http://www.tinycorelinux.net/11.x/x86_64/release/distribution_files/$f"
           done
-
+ 
           # Verify all expected files exist and are non-empty
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
-            DOC/dietlibc-0.35.tar.xz \
+            DOC/dietlibc-0.34.tar.xz \
             DOC/musl-1.2.6.tar.gz \
             GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \
@@ -128,12 +116,12 @@ jobs:
             fi
           done
           echo "All dependencies downloaded successfully"
-
+ 
       - name: Setup cross-compilation toolchains
         run: |
           set -euo pipefail
           sudo mkdir -p /opt
-
+ 
           # aarch64 (Linaro 7.4.1 dead since releases.linaro.org decomm;
           # use 7.2.1 from Armbian mirror, rename to Ventoy's expected dir)
           wget --tries=3 --timeout=60 \
@@ -142,27 +130,27 @@ jobs:
           sudo mv /opt/gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu \
                   /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu
           rm gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
-
+ 
           # MIPS loongson (per BuildVentoyFromSource.txt [9])
           wget --tries=3 --timeout=60 \
             https://github.com/ventoy/vtoytoolchain/releases/download/1.0/mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
           sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
           rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
-
+ 
           # mips64el musl (per BuildVentoyFromSource.txt [10])
           wget --tries=3 --timeout=60 \
             https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2
           sudo tar xf output.tar.bz2 -C /opt/
           sudo mv /opt/output /opt/mips64el-linux-musl-gcc730
           rm output.tar.bz2
-
+ 
           # Verify
           ls /opt/
           test -x /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc \
             && echo "aarch64 OK"
           test -x /opt/mips64el-linux-musl-gcc730/bin/mips64el-linux-musl-gcc \
             && echo "mips64el OK"
-
+ 
       - name: Build and install musl libc
         working-directory: ./ventoy_source
         run: |
@@ -172,34 +160,34 @@ jobs:
           cd musl-1.2.6
           ./configure
           sudo make install
-
+ 
       - name: Build Ventoy LiveCD ISO
         working-directory: ./ventoy_source
         run: |
           set -euo pipefail
-
+ 
           # === Fix hardcoded path in buildgrub.sh ===
           sed 's|/home/share/Ventoy/GRUB2/INSTALL|'"$PWD"'/GRUB2/INSTALL|g' \
             -i GRUB2/buildgrub.sh
-
+ 
           # === Allow GRUB2 to compile with newer GCC ===
           sed 's/configure/configure --disable-werror/g' \
             -i GRUB2/buildgrub.sh
-
+ 
           # === Fix autopoint failure (gettext 0.22 vs grub-2.04 po/) ===
           sed '1a mkdir -p /tmp/noautopoint && printf "#!/bin/sh\\nexit 0\\n" > /tmp/noautopoint/autopoint && chmod +x /tmp/noautopoint/autopoint && export PATH=/tmp/noautopoint:$PATH && export AUTOPOINT=true' \
             -i GRUB2/buildgrub.sh
-
+ 
           # === Fix automake version mismatch + autogen timestamp cascade ===
           sudo ln -sf /usr/bin/aclocal /usr/bin/aclocal-1.15 2>/dev/null || true
           sudo ln -sf /usr/bin/automake /usr/bin/automake-1.15 2>/dev/null || true
           sed 's|\./autogen\.sh|./autogen.sh \|\| true; touch aclocal.m4 configure Makefile.in config.h.in config-util.h.in|g' \
             -i GRUB2/buildgrub.sh
-
+ 
           # === Fix grub-2.04 parallel build race + squash4 zstd include ===
           sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& touch stamp-h1 \&\& sed -i "s/^libgrub\\.pp: /libgrub.pp: config-util.h /" Makefile \&\& sed -i "s@#include <zstd.h>@#include \\"../lib/zstd/zstd.h\\"@" grub-core/fs/squash4.c \&\& make -j 16 |' \
             -i GRUB2/buildgrub.sh
-
+ 
           # === Fix EDK2: -Werror + ucs-2 codec + Python 3.12 array API ===
           # (injected into buildedk.sh, which re-extracts the zip every run)
           # 1. BaseTools C: strip -Werror (BrotliCompress -Wvla-parameter etc.)
@@ -210,11 +198,11 @@ jobs:
           #    Python 3.9; crashes CreateAsBuiltInf/PeImageClass (Misc.py)
           sed 's|^\(/bin/cp -a ./edk2_mod/edk2-edk2-stable201911.*\)$|\1\nsed -i "s/-Wall -Werror/-Wall/" edk2-edk2-stable201911/BaseTools/Source/C/Makefiles/header.makefile\nsed -i "s/ -Werror / /g; s/ -Werror$//" edk2-edk2-stable201911/BaseTools/Conf/tools_def.template\ngrep -rlI -e "ucs-2" -e "UCS-2" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/ucs-2/utf-16/g; s/UCS-2/UTF-16/g"\ngrep -rlI -e "tostring()" -e "fromstring(" edk2-edk2-stable201911/BaseTools/Source/Python \| xargs -r sed -i "s/\.tostring()/\.tobytes()/g; s/\.fromstring(/\.frombytes(/g"|' \
             -i EDK2/buildedk.sh
-
+ 
           # === Fix grub-mknetdir call in install.sh ===
           sed 's|grub-mknetdir|if [ "$1" = "uefi" ]; then wpath="x86_64-efi"; elif [ "$1" = "i386efi" ]; then wpath="i386-efi"; else wpath="i386-pc"; fi; grub-mknetdir --directory "$VT_DIR/GRUB2/INSTALL/lib/grub/$wpath"|' \
             -i GRUB2/MOD_SRC/grub-2.04/install.sh
-
+ 
           # === Fix EDK2 shell scripts: dash -> bash (source/build builtins) ===
           sed 's/GCC48/GCC5/g' -i EDK2/build.sh
           sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/build.sh
@@ -222,10 +210,10 @@ jobs:
           sed 's|sh \./b|./b|g' -i EDK2/buildedk.sh
           sed '1s|#!/bin/sh|#!/bin/bash|' -i EDK2/build_shim.sh 2>/dev/null || \
             sed 's|#!/bin/sh|#!/bin/bash|' -i EDK2/build_shim.sh || true
-
+ 
           # === Make all scripts executable ===
           find . -name "*.sh" -exec chmod +x {} \;
-
+ 
           # === Verify critical patches actually applied (fail fast if
           #     upstream Ventoy drifted and a sed silently matched nothing) ===
           grep -q "noautopoint" GRUB2/buildgrub.sh \
@@ -236,20 +224,20 @@ jobs:
             || { echo "FATAL: EDK2 python patch sed did not apply"; exit 1; }
           grep -q "x86_64-efi" GRUB2/MOD_SRC/grub-2.04/install.sh \
             || { echo "FATAL: grub-mknetdir sed did not apply"; exit 1; }
-
+ 
           # === Fix bitwise typedef in linux/fs.h ===
           # NOTE: may be a no-op on 24.04's kernel headers (layout changed);
           # if the original "__bitwise undefined" error returns, the pattern
           # below needs adjusting for the new header.
           sudo sed 's/int __bitwise/int __bitwise;\ntypedef int/' \
             -i /usr/include/linux/fs.h
-
+ 
           # === Create /cow directory for i386-pc image build ===
           sudo mkdir -p /cow
-
+ 
           # === Set PATH for cross toolchains ===
           export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
-
+ 
           cd INSTALL
           sudo sh all_in_one.sh CI || {
             echo "=== BUILD FAILED ==="
@@ -267,13 +255,13 @@ jobs:
             tail -150 ../DOC/build.log
             exit 1
           }
-
+ 
       - name: List generated files
         working-directory: ./ventoy_source
         run: |
           echo "Listing all output files generated:"
           find INSTALL -type f \( -name "*.iso" -o -name "*.tar.gz" -o -name "*.zip" \) | sort
-
+ 
       - name: Rename and move
         working-directory: ./ventoy_source
         run: |
@@ -281,7 +269,7 @@ jobs:
           mv INSTALL/ventoy-*-livecd.iso "${{ github.workspace }}/dist/ventoy-${{ env.BUILD_DATE }}"
           mv INSTALL/ventoy-*-windows.zip "${{ github.workspace }}/dist/ventoy-${{ env.BUILD_DATE }}"
           mv INSTALL/ventoy-*-linux.tar.gz "${{ github.workspace }}/dist/ventoy-${{ env.BUILD_DATE }}"
-
+ 
       - name: Encrypt package and create release
         uses: ./ci_source/.github/actions/aes256pac_release_linux/
         with:

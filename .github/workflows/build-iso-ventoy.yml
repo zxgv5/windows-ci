@@ -65,11 +65,7 @@ jobs:
           set -euo pipefail
  
           cd DOC
-          # dietlibc: prefer fefe.de, fallback to Debian mirror
-          wget --tries=3 --timeout=30 \
-            https://www.fefe.de/dietlibc/dietlibc-0.34.tar.xz \
-            || wget --tries=3 --timeout=30 -O dietlibc-0.34.tar.xz \
-              "https://deb.debian.org/debian/pool/main/d/dietlibc/dietlibc_0.34~cvs20160606.orig.tar.xz"
+
  
           wget --tries=3 --timeout=30 \
             https://musl.libc.org/releases/musl-1.2.6.tar.gz
@@ -100,7 +96,6 @@ jobs:
           # Verify all expected files exist and are non-empty
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
-            DOC/dietlibc-0.34.tar.xz \
             DOC/musl-1.2.6.tar.gz \
             GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \

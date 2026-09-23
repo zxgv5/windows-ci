@@ -11,7 +11,7 @@ env:
 jobs:
   build:
     # ubuntu-22.04: gcc-7 unavailable on 24.04, GRUB2 needs older GCC era toolchain
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Set swap space
         uses: pierotofy/set-swap-space@master

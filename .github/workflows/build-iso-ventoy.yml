@@ -131,11 +131,12 @@ jobs:
                   /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu
           rm gcc-linaro-7.2.1-2017.11-x86_64_aarch64-linux-gnu.tar.xz
 
-          # aarch64 uclibc (Bootlin)
+          # aarch64 uclibc (Bootlin, current latest stable; was 2020.08)
+          # NOTE: 2024.05+ switched from .tar.bz2 to .tar.xz
           wget --tries=3 --timeout=60 \
-            https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2024.11-1.tar.bz2
-          sudo tar xf aarch64--uclibc--stable-2024.11-1.tar.bz2 -C /opt/
-          rm aarch64--uclibc--stable-2024.11-1.tar.bz2
+            https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--uclibc--stable-2025.08-1.tar.xz
+          sudo tar xf aarch64--uclibc--stable-2025.08-1.tar.xz -C /opt/
+          rm aarch64--uclibc--stable-2025.08-1.tar.xz
 
           # MIPS loongson (per BuildVentoyFromSource.txt [9])
           wget --tries=3 --timeout=60 \

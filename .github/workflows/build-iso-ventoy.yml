@@ -64,12 +64,6 @@ jobs:
         run: |
           set -euo pipefail
  
-          cd DOC
-
- 
-          wget --tries=3 --timeout=30 \
-            https://musl.libc.org/releases/musl-1.2.6.tar.gz
- 
           cd ../GRUB2
           wget --tries=3 --timeout=30 \
             https://ftp.gnu.org/gnu/grub/grub-2.04.tar.xz
@@ -96,7 +90,7 @@ jobs:
           # Verify all expected files exist and are non-empty
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
-            DOC/musl-1.2.6.tar.gz \
+
             GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \
             ExFAT/exfat-1.3.0.zip \
@@ -132,29 +126,10 @@ jobs:
           sudo tar xf mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz -C /opt/
           rm mips-loongson-gcc7.3-2019.06-29-linux-gnu.tar.gz
  
-          # mips64el musl (per BuildVentoyFromSource.txt [10])
-          wget --tries=3 --timeout=60 \
-            https://github.com/ventoy/musl-cross-make/releases/download/latest/output.tar.bz2
-          sudo tar xf output.tar.bz2 -C /opt/
-          sudo mv /opt/output /opt/mips64el-linux-musl-gcc730
-          rm output.tar.bz2
- 
           # Verify
           ls /opt/
           test -x /opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc \
             && echo "aarch64 OK"
-          test -x /opt/mips64el-linux-musl-gcc730/bin/mips64el-linux-musl-gcc \
-            && echo "mips64el OK"
- 
-      - name: Build and install musl libc
-        working-directory: ./ventoy_source
-        run: |
-          set -euo pipefail
-          cd DOC
-          tar xf musl-1.2.6.tar.gz
-          cd musl-1.2.6
-          ./configure
-          sudo make install
  
       - name: Build Ventoy LiveCD ISO
         working-directory: ./ventoy_source
@@ -231,7 +206,8 @@ jobs:
           sudo mkdir -p /cow
  
           # === Set PATH for cross toolchains ===
-          export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
+          # export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/:/opt/mips64el-linux-musl-gcc730/bin/
+          export PATH=$PATH:/opt/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:/opt/mips-loongson-gcc7.3-linux-gnu/2019.06-29/bin/
  
           cd INSTALL
           sudo sh all_in_one.sh CI || {

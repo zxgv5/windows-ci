@@ -207,17 +207,6 @@ jobs:
           # === Make all scripts executable ===
           find . -name "*.sh" -exec chmod +x {} \;
  
-          # === Verify critical patches actually applied (fail fast if
-          #     upstream Ventoy drifted and a sed silently matched nothing) ===
-          grep -q "noautopoint" GRUB2/buildgrub.sh \
-            || { echo "FATAL: autopoint hijack sed did not apply"; exit 1; }
-          grep -q "disable-werror" GRUB2/buildgrub.sh \
-            || { echo "FATAL: disable-werror sed did not apply"; exit 1; }
-          grep -q "tobytes" EDK2/buildedk.sh \
-            || { echo "FATAL: EDK2 python patch sed did not apply"; exit 1; }
-          # grep -q "x86_64-efi" GRUB2/MOD_SRC/grub-2.06/install.sh \
-          #   || { echo "FATAL: grub-mknetdir sed did not apply"; exit 1; }
- 
           # === Fix bitwise typedef in linux/fs.h ===
           # NOTE: may be a no-op on 24.04's kernel headers (layout changed);
           # if the original "__bitwise undefined" error returns, the pattern

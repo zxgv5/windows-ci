@@ -136,6 +136,8 @@ jobs:
         run: |
           set -euo pipefail
  
+          cd DOC
+ 
           # === Fix hardcoded path in buildgrub.sh ===
           sed 's|/home/share/Ventoy/GRUB2/INSTALL|'"$PWD"'/GRUB2/INSTALL|g' \
             -i GRUB2/buildgrub.sh

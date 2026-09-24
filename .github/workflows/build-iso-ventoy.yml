@@ -64,6 +64,8 @@ jobs:
         run: |
           set -euo pipefail
  
+          cd DOC
+ 
           cd ../GRUB2
           wget --tries=3 --timeout=30 \
             https://ftp.gnu.org/gnu/grub/grub-2.04.tar.xz

@@ -82,8 +82,8 @@ jobs:
             https://codeload.github.com/relan/exfat/zip/v1.4.0 \
             -O exfat-1.4.0.zip
           wget --tries=3 --timeout=30 \
-            https://codeload.github.com/libfuse/libfuse/zip/fuse-2.9.9 \
-            -O libfuse-fuse-2.9.9.zip
+            https://codeload.github.com/libfuse/libfuse/zip/fuse-3.18.3 \
+            -O libfuse-fuse-3.18.3.zip
  
           cd ../LiveCD/ISO/EFI/boot
           for f in vmlinuz64 corepure64.gz modules64.gz; do
@@ -98,7 +98,7 @@ jobs:
             GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \
             ExFAT/exfat-1.4.0.zip \
-            ExFAT/libfuse-fuse-2.9.9.zip \
+            ExFAT/libfuse-fuse-3.18.3.zip \
             LiveCD/ISO/EFI/boot/vmlinuz64 \
             LiveCD/ISO/EFI/boot/corepure64.gz \
             LiveCD/ISO/EFI/boot/modules64.gz

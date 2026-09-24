@@ -70,7 +70,7 @@ jobs:
  
           cd ../GRUB2
           wget --tries=3 --timeout=30 \
-            https://ftp.gnu.org/gnu/grub/grub-2.06.tar.xz
+            https://ftp.gnu.org/gnu/grub/grub-2.04.tar.xz
  
           cd ../EDK2
           wget --tries=3 --timeout=30 \
@@ -95,7 +95,7 @@ jobs:
           cd "${{ github.workspace }}/ventoy_source"
           for f in \
             DOC/musl-1.2.6.tar.gz \
-            GRUB2/grub-2.06.tar.xz \
+            GRUB2/grub-2.04.tar.xz \
             EDK2/edk2-edk2-stable201911.zip \
             ExFAT/exfat-1.4.0.zip \
             ExFAT/libfuse-fuse-3.18.3.zip \
@@ -160,26 +160,26 @@ jobs:
           set -euo pipefail
  
           # === Fix hardcoded path in buildgrub.sh ===
-          # sed 's|/home/share/Ventoy/GRUB2/INSTALL|'"$PWD"'/GRUB2/INSTALL|g' \
-          #   -i GRUB2/buildgrub.sh
+          sed 's|/home/share/Ventoy/GRUB2/INSTALL|'"$PWD"'/GRUB2/INSTALL|g' \
+            -i GRUB2/buildgrub.sh
  
           # === Allow GRUB2 to compile with newer GCC ===
-          # sed 's/configure/configure --disable-werror/g' \
-          #   -i GRUB2/buildgrub.sh
+          sed 's/configure/configure --disable-werror/g' \
+            -i GRUB2/buildgrub.sh
  
-          # === Fix autopoint failure (gettext 0.22 vs grub-2.06 po/) ===
-          # sed '1a mkdir -p /tmp/noautopoint && printf "#!/bin/sh\\nexit 0\\n" > /tmp/noautopoint/autopoint && chmod +x /tmp/noautopoint/autopoint && export PATH=/tmp/noautopoint:$PATH && export AUTOPOINT=true' \
-          #   -i GRUB2/buildgrub.sh
+          # === Fix autopoint failure (gettext 0.22 vs grub-2.04 po/) ===
+          sed '1a mkdir -p /tmp/noautopoint && printf "#!/bin/sh\\nexit 0\\n" > /tmp/noautopoint/autopoint && chmod +x /tmp/noautopoint/autopoint && export PATH=/tmp/noautopoint:$PATH && export AUTOPOINT=true' \
+            -i GRUB2/buildgrub.sh
  
           # === Fix automake version mismatch + autogen timestamp cascade ===
-          # sudo ln -sf /usr/bin/aclocal /usr/bin/aclocal-1.15 2>/dev/null || true
-          # sudo ln -sf /usr/bin/automake /usr/bin/automake-1.15 2>/dev/null || true
-          # sed 's|\./autogen\.sh|./autogen.sh \|\| true; touch aclocal.m4 configure Makefile.in config.h.in config-util.h.in|g' \
-          #   -i GRUB2/buildgrub.sh
+          sudo ln -sf /usr/bin/aclocal /usr/bin/aclocal-1.15 2>/dev/null || true
+          sudo ln -sf /usr/bin/automake /usr/bin/automake-1.15 2>/dev/null || true
+          sed 's|\./autogen\.sh|./autogen.sh \|\| true; touch aclocal.m4 configure Makefile.in config.h.in config-util.h.in|g' \
+            -i GRUB2/buildgrub.sh
  
-          # === Fix grub-2.06 parallel build race + squash4 zstd include ===
-          # sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& touch stamp-h1 \&\& sed -i "s/^libgrub\\.pp: /libgrub.pp: config-util.h /" Makefile \&\& sed -i "s@#include <zstd.h>@#include \\"../lib/zstd/zstd.h\\"@" grub-core/fs/squash4.c \&\& make -j 16 |' \
-          #   -i GRUB2/buildgrub.sh
+          # === Fix grub-2.04 parallel build race + squash4 zstd include ===
+          sed 's|^\(\s*\)make -j 16 |\1./config.status config-util.h \&\& touch stamp-h1 \&\& sed -i "s/^libgrub\\.pp: /libgrub.pp: config-util.h /" Makefile \&\& sed -i "s@#include <zstd.h>@#include \\"../lib/zstd/zstd.h\\"@" grub-core/fs/squash4.c \&\& make -j 16 |' \
+            -i GRUB2/buildgrub.sh
  
           # === Fix EDK2: -Werror + ucs-2 codec + Python 3.12 array API ===
           # (injected into buildedk.sh, which re-extracts the zip every run)
@@ -193,8 +193,8 @@ jobs:
             -i EDK2/buildedk.sh
  
           # === Fix grub-mknetdir call in install.sh ===
-          # sed 's|grub-mknetdir|if [ "$1" = "uefi" ]; then wpath="x86_64-efi"; elif [ "$1" = "i386efi" ]; then wpath="i386-efi"; else wpath="i386-pc"; fi; grub-mknetdir --directory "$VT_DIR/GRUB2/INSTALL/lib/grub/$wpath"|' \
-          #   -i GRUB2/MOD_SRC/grub-2.06/install.sh
+          sed 's|grub-mknetdir|if [ "$1" = "uefi" ]; then wpath="x86_64-efi"; elif [ "$1" = "i386efi" ]; then wpath="i386-efi"; else wpath="i386-pc"; fi; grub-mknetdir --directory "$VT_DIR/GRUB2/INSTALL/lib/grub/$wpath"|' \
+            -i GRUB2/MOD_SRC/grub-2.04/install.sh
  
           # === Fix EDK2 shell scripts: dash -> bash (source/build builtins) ===
           sed 's/GCC48/GCC5/g' -i EDK2/build.sh
@@ -206,6 +206,17 @@ jobs:
  
           # === Make all scripts executable ===
           find . -name "*.sh" -exec chmod +x {} \;
+ 
+          # === Verify critical patches actually applied (fail fast if
+          #     upstream Ventoy drifted and a sed silently matched nothing) ===
+          grep -q "noautopoint" GRUB2/buildgrub.sh \
+            || { echo "FATAL: autopoint hijack sed did not apply"; exit 1; }
+          grep -q "disable-werror" GRUB2/buildgrub.sh \
+            || { echo "FATAL: disable-werror sed did not apply"; exit 1; }
+          grep -q "tobytes" EDK2/buildedk.sh \
+            || { echo "FATAL: EDK2 python patch sed did not apply"; exit 1; }
+          grep -q "x86_64-efi" GRUB2/MOD_SRC/grub-2.04/install.sh \
+            || { echo "FATAL: grub-mknetdir sed did not apply"; exit 1; }
  
           # === Fix bitwise typedef in linux/fs.h ===
           # NOTE: may be a no-op on 24.04's kernel headers (layout changed);

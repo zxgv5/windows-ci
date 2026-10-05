@@ -1,0 +1,131 @@
+name: build-simplewall
+
+on:
+  workflow_dispatch:
+
+env:
+  BUILD_DATE: ''
+  SIMPLEWALL_REF: 'master'
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    # windows-latest = VS2022 (v143 toolset) — matches the vcxproj's
+    # PlatformToolset=v143 & stdcpplatest. Desktop C++ workload and
+    # x64 components are preinstalled on the runner.
+    runs-on: windows-latest
+    steps:
+      - name: Generate timestamp
+        shell: bash
+        run: |
+          echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+
+      # === Sibling-checkout (NOT submodules: recursive) ===
+      # simplewall's .gitmodules points OUTSIDE the repo (../routine,
+      # ../builder — the author's local parent-dir layout). checkout's
+      # submodule support chokes on ../ paths, so materialize the layout
+      # manually: workspace/{simplewall,routine,builder}. The vcxproj's
+      # include path .\..\routine\src\ then resolves correctly.
+      - name: Checkout simplewall
+        uses: actions/checkout@v5
+        with:
+          repository: henrypp/simplewall
+          ref: ${{ env.SIMPLEWALL_REF }}
+          path: simplewall
+          fetch-depth: 0
+
+      - name: Checkout routine (shared lib dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: henrypp/routine
+          ref: master
+          path: routine
+
+      # === Extract version from build.bat (fail fast on drift) ===
+      - name: Extract version from build.bat
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -oP "call build \w+ \K[0-9.]+" simplewall/build.bat | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "FATAL: could not parse version from build.bat —"
+            echo "upstream may have changed its build invocation format"
+            cat simplewall/build.bat
+            exit 1
+          fi
+          echo "SIMPLEWALL_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Version: $VERSION"
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # === Build x64 only ===
+      # Clean build expected: v143 + stdcpplatest on VS2022, no patching
+      # needed. Single platform keeps this fast (~1-2 min).
+      - name: Build (x64 Release)
+        shell: pwsh
+        run: |
+          msbuild simplewall\simplewall.sln /m /nologo /v:m `
+            /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "=== BUILD FAILED (x64) ==="
+            exit 1
+          }
+
+      # === Verify output (fail fast, Ventoy-CI style) ===
+      # OutDir is $(SolutionDir)bin\$(PlatformArchitecture)\. x64 platform
+      # should map to bin\x64; but the author's build_package.py expects
+      # bin\64 (its "buildfor_64" check) — accept either, fail loudly
+      # with a bin/ listing if neither exists.
+      - name: Verify and stage (x64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=""
+          for d in bin/x64 bin/64; do
+            [ -s "simplewall/$d/simplewall.exe" ] && OUT="simplewall/$d" && break
+          done
+          if [ -z "$OUT" ]; then
+            echo "FATAL: simplewall.exe not found in bin/x64 or bin/64 —"
+            echo "OutDir layout drifted upstream? Actual bin/ contents:"
+            find simplewall/bin -type f 2>/dev/null || echo "(bin/ does not exist)"
+            exit 1
+          fi
+          echo "OUTDIR=$OUT" >> $GITHUB_ENV
+          echo "=== Built: $OUT/simplewall.exe ==="
+          ls -la "$OUT/"
+          sha256sum "$OUT/simplewall.exe"
+
+      # === Rename and move (Ventoy-style) ===
+      # Portable package mirroring the author's build_package.py layout:
+      # exe (+ siblings) + data files marked with #PORTABLE# marker.
+      - name: Rename and move
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${SIMPLEWALL_VERSION:-unknown}"
+          DEST="${{ github.workspace }}/dist/simplewall-${{ env.BUILD_DATE }}"
+          mkdir -p "$DEST"
+
+          # Core binary + anything else the build dropped alongside
+          # (dlls, locales etc. — copy the whole dir, then add the
+          # author's packaging extras on top)
+          cp -r "${OUTDIR}/." "$DEST/"
+          printf '#PORTABLE#' > "$DEST/portable.dat"
+
+          # Data files live in bin/ root (not bin\x64) per build_package.py
+          for f in Readme.txt History.txt License.txt simplewall.ini simplewall.lng; do
+            src="simplewall/bin/$f"
+            [ -f "$src" ] && cp "$src" "$DEST/" || echo "note: $f not present (author's script tolerates this)"
+          done
+
+          echo "=== Staged package ==="
+          find "$DEST" -type f | sort
+
+      # === Encrypt package and create release (Ventoy-style) ===
+      - name: Encrypt package and create release
+        uses: ./ci_source/.github/actions/aes256pac_release_windows/
+        with:
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          BUILD_ARTIFACT_PATH: "./dist/simplewall-${{ env.BUILD_DATE }}"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-simplewall"

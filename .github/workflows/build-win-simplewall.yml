@@ -1,4 +1,4 @@
-name: build-simplewall
+name: build-win-simplewall
 
 on:
   workflow_dispatch:

@@ -59,9 +59,46 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      # === NuGet restore (packages.config — REQUIRED) ===
+      # simplewall uses classic packages.config (Microsoft.Windows.CppWinRT
+      # 2.0.230706.1), NOT PackageReference — so MSBuild will NOT auto-restore
+      # during build. /t:Restore alone only walks PackageReference projects;
+      # RestorePackagesConfig=true extends it to packages.config (MSBuild
+      # 16.1+ / VS2019+, fine on VS2022). nuget.exe fallback covers any
+      # runner-image quirk.
+      - name: NuGet restore
+        shell: pwsh
+        run: |
+          msbuild simplewall\simplewall.sln /t:Restore /p:RestorePackagesConfig=true /nologo /v:m
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "msbuild restore failed, trying nuget.exe..."
+            nuget restore simplewall\simplewall.sln
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "=== NUGET RESTORE FAILED ==="
+              exit 1
+            }
+          }
+
+      # === Drift sentinel: verify CppWinRT actually landed ===
+      # If upstream bumps the CppWinRT version, restore handles it
+      # transparently — this assertion only checks that SOMETHING was
+      # restored and the props file the vcxproj imports exists.
+      - name: Verify NuGet packages restored
+        shell: bash
+        run: |
+          set -euo pipefail
+          comp=$(find simplewall/packages -maxdepth 1 -name "Microsoft.Windows.CppWinRT.*" 2>/dev/null | head -1)
+          if [ -z "$comp" ]; then
+            echo "FATAL: no Microsoft.Windows.CppWinRT.* under simplewall/packages —"
+            echo "restore reported success but nothing landed; packages.config drift?"
+            ls -la simplewall/ | head -30
+            exit 1
+          fi
+          test -s "$comp/build/native/Microsoft.Windows.CppWinRT.props" \
+            || { echo "FATAL: $comp/build/native/Microsoft.Windows.CppWinRT.props missing"; exit 1; }
+          echo "=== Restored: $comp ==="
+
       # === Build x64 only ===
-      # Clean build expected: v143 + stdcpplatest on VS2022, no patching
-      # needed. Single platform keeps this fast (~1-2 min).
       - name: Build (x64 Release)
         shell: pwsh
         run: |
@@ -97,8 +134,6 @@ jobs:
           sha256sum "$OUT/simplewall.exe"
 
       # === Rename and move (Ventoy-style) ===
-      # Portable package mirroring the author's build_package.py layout:
-      # exe (+ siblings) + data files marked with #PORTABLE# marker.
       - name: Rename and move
         shell: bash
         run: |
@@ -107,13 +142,9 @@ jobs:
           DEST="${{ github.workspace }}/dist/simplewall-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
 
-          # Core binary + anything else the build dropped alongside
-          # (dlls, locales etc. — copy the whole dir, then add the
-          # author's packaging extras on top)
           cp -r "${OUTDIR}/." "$DEST/"
           printf '#PORTABLE#' > "$DEST/portable.dat"
 
-          # Data files live in bin/ root (not bin\x64) per build_package.py
           for f in Readme.txt History.txt License.txt simplewall.ini simplewall.lng; do
             src="simplewall/bin/$f"
             [ -f "$src" ] && cp "$src" "$DEST/" || echo "note: $f not present (author's script tolerates this)"

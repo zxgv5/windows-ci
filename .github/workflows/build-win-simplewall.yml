@@ -2,10 +2,24 @@ name: build-win-simplewall
 
 on:
   workflow_dispatch:
+    inputs:
+      simplewall_ref:
+        description: 'simplewall ref to build (branch or tag)'
+        required: true
+        default: 'master'
+        type: choice
+        options:
+          - master
+          - v.3.9.1
+          - v.3.9
+          - v.3.8.7
+          - v.3.8.6.1
+          - v.3.8.6
 
 env:
   BUILD_DATE: ''
-  SIMPLEWALL_REF: 'master'
+  # Ref comes from the dropdown; master remains the default.
+  SIMPLEWALL_REF: ${{ inputs.simplewall_ref }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
@@ -24,8 +38,8 @@ jobs:
       # simplewall's .gitmodules points OUTSIDE the repo (../routine,
       # ../builder — the author's local parent-dir layout). checkout's
       # submodule support chokes on ../ paths, so materialize the layout
-      # manually: workspace/{simplewall,routine,builder}. The vcxproj's
-      # include path .\..\routine\src\ then resolves correctly.
+      # manually: workspace/{simplewall,routine}. The vcxproj's include
+      # path .\..\routine\src\ then resolves correctly.
       - name: Checkout simplewall
         uses: actions/checkout@v5
         with:
@@ -34,11 +48,48 @@ jobs:
           path: simplewall
           fetch-depth: 0
 
+      # === Resolve routine SHA pinned to simplewall HEAD ===
+      # routine@master raced AHEAD of simplewall@master upstream (author
+      # pushes routine first): master lacks network_string and references
+      # IDS_UPDATE_AUTOINSTALL which simplewall's resources don't define.
+      # Prefer the gitlink recorded in simplewall's tree; fall back to the
+      # last routine commit BEFORE simplewall HEAD's date (closes the
+      # push-order race window). For TAG builds this is extra reliable:
+      # a released tag is a frozen point, so its date-paired routine is
+      # the one the author actually shipped with.
+      - name: Resolve matching routine SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd simplewall
+
+          # 1) gitlink, if the ../routine submodule is recorded in the tree
+          SHA=$(git ls-tree HEAD | awk '$4 ~ /routine/ && $1 ~ /^160000/ {print $3}' | head -1)
+
+          # 2) fallback: last routine commit before simplewall HEAD date
+          if [ -z "$SHA" ]; then
+            DATE=$(git log -1 --format=%cI)
+            echo "no gitlink; resolving routine as-of $DATE via GitHub API"
+            SHA=$(curl -fsS \
+              "https://api.github.com/repos/henrypp/routine/commits?until=${DATE}&per_page=1" \
+              | jq -r '.[0].sha')
+          fi
+
+          if [ -z "$SHA" ] || [ "$SHA" = "null" ]; then
+            echo "FATAL: could not resolve a routine SHA matching simplewall HEAD"
+            git ls-tree HEAD
+            exit 1
+          fi
+
+          echo "ROUTINE_SHA=$SHA" >> $GITHUB_ENV
+          echo "=== routine pinned to: $SHA ==="
+          echo "=== simplewall ref:     ${SIMPLEWALL_REF} ($(git rev-parse HEAD), $(git log -1 --format=%cI)) ==="
+
       - name: Checkout routine (shared lib dependency)
         uses: actions/checkout@v5
         with:
           repository: henrypp/routine
-          ref: master
+          ref: ${{ env.ROUTINE_SHA }}
           path: routine
 
       # === Extract version from build.bat (fail fast on drift) ===
@@ -54,7 +105,7 @@ jobs:
             exit 1
           fi
           echo "SIMPLEWALL_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Version: $VERSION"
+          echo "Version: $VERSION (ref: ${SIMPLEWALL_REF})"
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -80,9 +131,6 @@ jobs:
           }
 
       # === Drift sentinel: verify CppWinRT actually landed ===
-      # If upstream bumps the CppWinRT version, restore handles it
-      # transparently — this assertion only checks that SOMETHING was
-      # restored and the props file the vcxproj imports exists.
       - name: Verify NuGet packages restored
         shell: bash
         run: |
@@ -110,10 +158,6 @@ jobs:
           }
 
       # === Verify output (fail fast, Ventoy-CI style) ===
-      # OutDir is $(SolutionDir)bin\$(PlatformArchitecture)\. x64 platform
-      # should map to bin\x64; but the author's build_package.py expects
-      # bin\64 (its "buildfor_64" check) — accept either, fail loudly
-      # with a bin/ listing if neither exists.
       - name: Verify and stage (x64)
         shell: bash
         run: |
@@ -138,8 +182,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          V="${SIMPLEWALL_VERSION:-unknown}"
-          DEST="${{ github.workspace }}/dist/simplewall-${{ env.BUILD_DATE }}"
+          DEST="${{ github.workspace }}/dist/simplewall-${{ env.SIMPLEWALL_REF }}-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
 
           cp -r "${OUTDIR}/." "$DEST/"
@@ -158,5 +201,5 @@ jobs:
         uses: ./ci_source/.github/actions/aes256pac_release_windows/
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
-          BUILD_ARTIFACT_PATH: "./dist/simplewall-${{ env.BUILD_DATE }}"
-          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-simplewall"
+          BUILD_ARTIFACT_PATH: "./dist/simplewall-${{ env.SIMPLEWALL_REF }}-${{ env.BUILD_DATE }}"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-simplewall-${{ env.SIMPLEWALL_REF }}"

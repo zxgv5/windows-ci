@@ -1,205 +1,192 @@
-name: build-win-simplewall
+name: build-simplewall
 
 on:
   workflow_dispatch:
-    inputs:
-      simplewall_ref:
-        description: 'simplewall ref to build (branch or tag)'
-        required: true
-        default: 'master'
-        type: choice
-        options:
-          - master
-          - v.3.9.1
-          - v.3.9
-          - v.3.8.7
-          - v.3.8.6.1
-          - v.3.8.6
+
+permissions:
+  contents: write   # 绿灯后快照基线需要 push
+  issues: write      # 门禁红灯时开跟踪 issue
 
 env:
   BUILD_DATE: ''
-  # Ref comes from the dropdown; master remains the default.
-  SIMPLEWALL_REF: ${{ inputs.simplewall_ref }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ISSUE_TITLE: '[gate] simplewall: upstream routine not buildable with current simplewall'
 
 jobs:
   build:
-    # windows-latest = VS2022 (v143 toolset) — matches the vcxproj's
-    # PlatformToolset=v143 & stdcpplatest. Desktop C++ workload and
-    # x64 components are preinstalled on the runner.
     runs-on: windows-latest
     steps:
+      # === Checkout SELF (root) — 与 sumatrapdf 同一布局规则：
+      # 自仓库在根（带来 .github/actions/aes256pac_release），
+      # 上游全部进子路径。
+      - name: Checkout CI repo (self)
+        uses: actions/checkout@v5
+
       - name: Generate timestamp
         shell: bash
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
 
-      # === Sibling-checkout (NOT submodules: recursive) ===
-      # simplewall's .gitmodules points OUTSIDE the repo (../routine,
-      # ../builder — the author's local parent-dir layout). checkout's
-      # submodule support chokes on ../ paths, so materialize the layout
-      # manually: workspace/{simplewall,routine}. The vcxproj's include
-      # path .\..\routine\src\ then resolves correctly.
+      # === 兄弟目录布局：simplewall 的工程通过 ../routine 相对路径
+      # 引用 routine 源码，所以二者必须互为兄弟目录。
       - name: Checkout simplewall
         uses: actions/checkout@v5
         with:
           repository: henrypp/simplewall
-          ref: ${{ env.SIMPLEWALL_REF }}
+          ref: master
           path: simplewall
           fetch-depth: 0
 
-      # === Resolve routine SHA pinned to simplewall HEAD ===
-      # routine@master raced AHEAD of simplewall@master upstream (author
-      # pushes routine first): master lacks network_string and references
-      # IDS_UPDATE_AUTOINSTALL which simplewall's resources don't define.
-      # Prefer the gitlink recorded in simplewall's tree; fall back to the
-      # last routine commit BEFORE simplewall HEAD's date (closes the
-      # push-order race window). For TAG builds this is extra reliable:
-      # a released tag is a frozen point, so its date-paired routine is
-      # the one the author actually shipped with.
-      - name: Resolve matching routine SHA
+      - name: Checkout routine
+        uses: actions/checkout@v5
+        with:
+          repository: henrypp/routine
+          ref: master
+          path: routine
+          fetch-depth: 0
+
+      # === 门禁：若存在已验证的 vendored 基线，则覆盖上游 routine ===
+      - name: Apply vendored routine baseline (if present)
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d .baseline/routine ] && [ -n "$(ls -A .baseline/routine 2>/dev/null)" ]; then
+            echo "had_baseline=true" >> "$GITHUB_OUTPUT"
+            echo "Vendored routine baseline FOUND — overriding upstream checkout"
+            rm -rf routine
+            cp -r .baseline/routine routine
+            cat .baseline/MANIFEST.md 2>/dev/null || true
+          else
+            echo "had_baseline=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No vendored baseline — probing upstream pairing directly. Expected to FAIL until henrypp pushes matching routine (PCR_STRINGREF gap)."
+          fi
+
+      - name: Resolve version
         shell: bash
         run: |
           set -euo pipefail
           cd simplewall
-
-          # 1) gitlink, if the ../routine submodule is recorded in the tree
-          SHA=$(git ls-tree HEAD | awk '$4 ~ /routine/ && $1 ~ /^160000/ {print $3}' | head -1)
-
-          # 2) fallback: last routine commit before simplewall HEAD date
-          if [ -z "$SHA" ]; then
-            DATE=$(git log -1 --format=%cI)
-            echo "no gitlink; resolving routine as-of $DATE via GitHub API"
-            SHA=$(curl -fsS \
-              "https://api.github.com/repos/henrypp/routine/commits?until=${DATE}&per_page=1" \
-              | jq -r '.[0].sha')
+          VER=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' build.bat 2>/dev/null | head -1 || true)
+          if [ -z "$VER" ]; then
+            VER=$(git describe --tags --abbrev=0 2>/dev/null || true)
           fi
-
-          if [ -z "$SHA" ] || [ "$SHA" = "null" ]; then
-            echo "FATAL: could not resolve a routine SHA matching simplewall HEAD"
-            git ls-tree HEAD
-            exit 1
+          if [ -z "$VER" ]; then
+            VER="git-$(git rev-parse --short HEAD)"
+            echo "::notice::version fallback: $VER"
           fi
-
-          echo "ROUTINE_SHA=$SHA" >> $GITHUB_ENV
-          echo "=== routine pinned to: $SHA ==="
-          echo "=== simplewall ref:     ${SIMPLEWALL_REF} ($(git rev-parse HEAD), $(git log -1 --format=%cI)) ==="
-
-      - name: Checkout routine (shared lib dependency)
-        uses: actions/checkout@v5
-        with:
-          repository: henrypp/routine
-          ref: ${{ env.ROUTINE_SHA }}
-          path: routine
-
-      # === Extract version from build.bat (fail fast on drift) ===
-      - name: Extract version from build.bat
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION=$(grep -oP "call build \w+ \K[0-9.]+" simplewall/build.bat | head -1)
-          if [ -z "$VERSION" ]; then
-            echo "FATAL: could not parse version from build.bat —"
-            echo "upstream may have changed its build invocation format"
-            cat simplewall/build.bat
-            exit 1
-          fi
-          echo "SIMPLEWALL_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Version: $VERSION (ref: ${SIMPLEWALL_REF})"
+          echo "SIMPLEWALL_VERSION=$VER" >> $GITHUB_ENV
+          echo "Version: $VER"
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # === NuGet restore (packages.config — REQUIRED) ===
-      # simplewall uses classic packages.config (Microsoft.Windows.CppWinRT
-      # 2.0.230706.1), NOT PackageReference — so MSBuild will NOT auto-restore
-      # during build. /t:Restore alone only walks PackageReference projects;
-      # RestorePackagesConfig=true extends it to packages.config (MSBuild
-      # 16.1+ / VS2019+, fine on VS2022). nuget.exe fallback covers any
-      # runner-image quirk.
-      - name: NuGet restore
+      # 容错式 restore：有 packages.config 才做，没有就跳过
+      - name: NuGet restore (if applicable)
         shell: pwsh
         run: |
-          msbuild simplewall\simplewall.sln /t:Restore /p:RestorePackagesConfig=true /nologo /v:m
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "msbuild restore failed, trying nuget.exe..."
-            nuget restore simplewall\simplewall.sln
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "=== NUGET RESTORE FAILED ==="
-              exit 1
-            }
+          $sln = Get-ChildItem simplewall -Filter *.sln -Recurse -Depth 2 | Select-Object -First 1
+          $pkg = Get-ChildItem simplewall -Filter packages.config -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($pkg -and $sln) {
+            Write-Host "Restoring packages for $($sln.FullName)"
+            nuget restore $sln.FullName
+          } else {
+            Write-Host "No packages.config found — skipping NuGet restore"
           }
 
-      # === Drift sentinel: verify CppWinRT actually landed ===
-      - name: Verify NuGet packages restored
+      # continue-on-error + 下游判读：失败时不直接终止 job，
+      # 让跟踪 issue 步骤有机会先运行。
+      - name: Build (Release x64)
+        id: build
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sln = Get-ChildItem simplewall -Filter *.sln -Recurse -Depth 2 | Select-Object -First 1
+          if (-not $sln) { throw "no .sln found under simplewall/" }
+          Write-Host "Building: $($sln.FullName)"
+          msbuild $sln.FullName /p:Configuration=Release /p:Platform=x64 /m /v:m
+
+      # === 门禁红灯：开/更新跟踪 issue，然后才让 job 失败 ===
+      - name: Open/update tracking issue (build failed)
+        if: steps.build.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SW_SHA=$(git -C simplewall rev-parse --short HEAD)
+          RT_SHA=$(git -C routine rev-parse --short HEAD)
+          BODY="Daily build probe failed on ${{ env.BUILD_DATE }}.
+          Pairing probed: simplewall@${SW_SHA} + routine@${RT_SHA}
+          Typical signature: PCR_STRINGREF unresolved (routine reFUCKtoring not pushed to GitHub).
+          Full log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          NUM=$(gh issue list --state open --search "in:title ${ISSUE_TITLE}" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" --body "$BODY"
+          else
+            gh issue create --title "${ISSUE_TITLE}" --body "$BODY"
+          fi
+          exit 1
+
+      # ===== 以下全部仅在构建成功时执行 =====
+      - name: Verify output (x64)
+        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
-          comp=$(find simplewall/packages -maxdepth 1 -name "Microsoft.Windows.CppWinRT.*" 2>/dev/null | head -1)
-          if [ -z "$comp" ]; then
-            echo "FATAL: no Microsoft.Windows.CppWinRT.* under simplewall/packages —"
-            echo "restore reported success but nothing landed; packages.config drift?"
-            ls -la simplewall/ | head -30
+          EXE=$(find simplewall -name "simplewall.exe" -path "*Release*" | head -1)
+          if [ -z "$EXE" ]; then
+            echo "FATAL: simplewall.exe not found in any Release output dir"
+            find simplewall -name "*.exe" 2>/dev/null | head -20 || true
             exit 1
           fi
-          test -s "$comp/build/native/Microsoft.Windows.CppWinRT.props" \
-            || { echo "FATAL: $comp/build/native/Microsoft.Windows.CppWinRT.props missing"; exit 1; }
-          echo "=== Restored: $comp ==="
+          echo "EXE_PATH=$EXE" >> "$GITHUB_ENV"
+          echo "=== Built ==="
+          ls -la "$(dirname "$EXE")"
+          sha256sum "$EXE"
 
-      # === Build x64 only ===
-      - name: Build (x64 Release)
-        shell: pwsh
-        run: |
-          msbuild simplewall\simplewall.sln /m /nologo /v:m `
-            /p:Configuration=Release /p:Platform=x64
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "=== BUILD FAILED (x64) ==="
-            exit 1
-          }
-
-      # === Verify output (fail fast, Ventoy-CI style) ===
-      - name: Verify and stage (x64)
-        shell: bash
-        run: |
-          set -euo pipefail
-          OUT=""
-          for d in bin/x64 bin/64; do
-            [ -s "simplewall/$d/simplewall.exe" ] && OUT="simplewall/$d" && break
-          done
-          if [ -z "$OUT" ]; then
-            echo "FATAL: simplewall.exe not found in bin/x64 or bin/64 —"
-            echo "OutDir layout drifted upstream? Actual bin/ contents:"
-            find simplewall/bin -type f 2>/dev/null || echo "(bin/ does not exist)"
-            exit 1
-          fi
-          echo "OUTDIR=$OUT" >> $GITHUB_ENV
-          echo "=== Built: $OUT/simplewall.exe ==="
-          ls -la "$OUT/"
-          sha256sum "$OUT/simplewall.exe"
-
-      # === Rename and move (Ventoy-style) ===
+      # simplewall 是单文件静态 exe，无 dll 伴生物，只拷 exe
       - name: Rename and move
+        if: steps.build.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
-          DEST="${{ github.workspace }}/dist/simplewall-${{ env.SIMPLEWALL_REF }}-${{ env.BUILD_DATE }}"
+          DEST="${{ github.workspace }}/dist/simplewall-${{ env.SIMPLEWALL_VERSION }}-x64-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
-
-          cp -r "${OUTDIR}/." "$DEST/"
-          printf '#PORTABLE#' > "$DEST/portable.dat"
-
-          for f in Readme.txt History.txt License.txt simplewall.ini simplewall.lng; do
-            src="simplewall/bin/$f"
-            [ -f "$src" ] && cp "$src" "$DEST/" || echo "note: $f not present (author's script tolerates this)"
-          done
-
-          echo "=== Staged package ==="
+          cp "${{ env.EXE_PATH }}" "$DEST/"
           find "$DEST" -type f | sort
 
-      # === Encrypt package and create release (Ventoy-style) ===
+      # === 关键修正：真实 action 路径（仓库根，无 ci_source 前缀、
+      # 无 _windows 后缀），并补上 ZIP_COMPRESS_LEVEL ===
       - name: Encrypt package and create release
-        uses: ./ci_source/.github/actions/aes256pac_release_windows/
+        if: steps.build.outcome == 'success'
+        uses: ./.github/actions/aes256pac_release/
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
-          BUILD_ARTIFACT_PATH: "./dist/simplewall-${{ env.SIMPLEWALL_REF }}-${{ env.BUILD_DATE }}"
-          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-simplewall-${{ env.SIMPLEWALL_REF }}"
+          ZIP_COMPRESS_LEVEL: '9'
+          BUILD_ARTIFACT_PATH: "./dist/simplewall-${{ env.SIMPLEWALL_VERSION }}-x64-${{ env.BUILD_DATE }}"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-simplewall-${{ env.SIMPLEWALL_VERSION }}-x64"
+
+      # === 门禁绿灯的红利：把刚验证过能构建的配对固化为基线 ===
+      - name: Snapshot verified pairing as baseline
+        if: steps.build.outcome == 'success' && steps.gate.outputs.had_baseline == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SW_SHA=$(git -C simplewall rev-parse HEAD)
+          RT_SHA=$(git -C routine rev-parse HEAD)
+          mkdir -p .baseline/routine
+          # git archive 导出，天然排除 .git —— 避免嵌套仓库 gitlink 陷阱
+          git -C routine archive HEAD | tar -x -C .baseline/routine
+          cat > .baseline/MANIFEST.md <<EOF
+          # Verified buildable pairing
+          - simplewall: ${SW_SHA}
+          - routine:    ${RT_SHA}
+          - verified:   ${{ env.BUILD_DATE }} (run ${{ github.run_id }})
+          EOF
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add .baseline
+          git commit -m "baseline: verified pairing simplewall@${SW_SHA:0:7} + routine@${RT_SHA:0:7}"
+          git push

@@ -77,22 +77,19 @@ jobs:
           choco install innosetup -y
 
       # === Build 1: UI（Wiki 的 QtCreator 流程翻译为命令行）===
-      # === Translations: independent step, never chained with && ===
-      # release_ts.bat's cwd assumption is unknown to us (couldn't read
-      # its source beforehand) — running from repo root is the common
-      # convention; the `type` dump lets the NEXT log show its internals
-      # if this still fails.
+      # === Translations ===
+      # release_ts.bat expects QT_HOME env (author's local machine has it set
+      # system-wide; the in-file assignment is commented out). The bat is
+      # self-anchoring (%~dp0), so caller cwd doesn't matter — verified by
+      # the source dump in the 13:22 run.
       - name: Generate translations
         shell: cmd
         run: |
           cd fort
-          echo === release_ts.bat contents ===
-          type src\scripts\i18n\release_ts.bat
-          echo === running from repo root ===
+          set "QT_HOME=%QT_ROOT_DIR%"
           call src\scripts\i18n\release_ts.bat
-          if errorlevel 1 echo ::warning::release_ts.bat exited %ERRORLEVEL% — see listing below
           echo === .qm files generated ===
-          dir /s /b src\ui\i18n\*.qm 2>nul
+          dir /s /b src\ui\i18n\*.qm
           if not errorlevel 1 echo QM_FILES_OK
 
       - name: Build UI (Release x64)

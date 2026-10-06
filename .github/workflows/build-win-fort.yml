@@ -1,0 +1,152 @@
+name: build-win-fort
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BUILD_DATE: ''
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    # Wiki 明确以 VS 2022 为基准（含 WDK 版本配对要求），故钉 2022 镜像。
+    runs-on: windows-2022
+    steps:
+      # === Checkout SELF (root) — 布局规则与前两条线一致：自仓库在根，
+      # 上游进子路径。根路径签出上游会清掉 .github/actions。
+      - name: Checkout CI repo (self)
+        uses: actions/checkout@v5
+
+      - name: Generate timestamp
+        shell: bash
+        run: echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+
+      # === Upstream to subpath ===
+      - name: Checkout fort
+        uses: actions/checkout@v5
+        with:
+          repository: tnodir/fort
+          ref: master
+          path: fort
+          fetch-depth: 0
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd fort
+          # ChangeLog 首行通常是 "x.y.z ..." 格式；失败则回退 git tag
+          VER=$(grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+' ChangeLog 2>/dev/null || true)
+          [ -z "$VER" ] && VER=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          [ -z "$VER" ] && VER="git-$(git rev-parse --short HEAD)"
+          echo "FORT_VERSION=$VER" >> $GITHUB_ENV
+          echo "Version: $VER"
+
+      # === Toolchain 1: MSVC x64 dev env（nmake 与 driver 构建都依赖）===
+      - name: Setup MSVC environment (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # === Toolchain 2: Qt 6（官方预编译 MSVC x64）===
+      # Wiki 流程是从源码静态编 Qt（qt-build.bat，数小时）——CI 用 aqt 预编译
+      # 是务实替代。共享/静态链接差异可能影响部署清单，见文首风险点 2。
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'          # 按 fort 当前要求微调
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Record Qt directory
+        shell: pwsh
+        run: |
+          $qmake = (Get-Command qmake).Source
+          $qtDir = Split-Path (Split-Path $qmake)   # ...\6.8.x\msvc2022_64
+          "QT_DIR=$qtDir" | Out-File -Append $env:GITHUB_ENV
+
+      # === Toolchain 3: WDK + Inno Setup（runner 均不预装）===
+      # 风险点 1/3：包名与版本需首跑核实；WDK 版本必须与镜像 SDK 对齐。
+      - name: Install WDK and Inno Setup
+        shell: pwsh
+        run: |
+          choco install windowsdriverkit10 -y
+          choco install innosetup -y
+
+      # === Build 1: UI（Wiki 的 QtCreator 流程翻译为命令行）===
+      - name: Build UI (Release x64)
+        shell: cmd
+        run: |
+          cd fort
+          cd src\scripts\i18n && call release_ts.bat && cd ..\..\..
+          if not exist build-win10 mkdir build-win10
+          cd build-win10
+          qmake ..\src\FortFirewall.pro
+          nmake
+
+      # === Build 2: Driver ===
+      - name: Build driver (x64)
+        shell: cmd
+        run: |
+          cd fort\src\driver
+          call msvcbuild-win10-64.bat
+
+      # === Patch: create-installer.bat 的 INNO_PATH 是硬编码的作者本地路径 ===
+      - name: Patch installer path
+        shell: pwsh
+        run: |
+          $f = "fort\deploy\create-installer.bat"
+          (Get-Content $f) -replace 'set INNO_PATH=.*', 'set INNO_PATH=ISCC.exe' |
+            Set-Content $f
+
+      # === Deploy + Installer（官方脚本）===
+      # -QtPath 覆盖为 aqt 的 Qt 目录（ps1 支持命名参数）；
+      # 若部署报缺文件，见风险点 2/4 的处置说明。
+      - name: Deploy and create installer
+        shell: cmd
+        run: |
+          cd fort\deploy
+          call setup-deployment.bat -Config win10 -QtPath "%QT_DIR%" -BuildPath "..\build-win10"
+
+      # === Verify（fail fast）===
+      - name: Verify output
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== UI ==="
+          ls -la fort/build-win10/ui_bin/FortFirewall.exe
+          echo "=== Driver ==="
+          ls -la fort/build-driver-win10/x64/fortfw.sys
+          INSTALLER=$(find fort/deploy/out -name "FortFirewall-*.exe" | head -1)
+          if [ -z "$INSTALLER" ]; then
+            echo "FATAL: installer missing under fort/deploy/out"
+            find fort/deploy -type f | head -30
+            exit 1
+          fi
+          echo "INSTALLER_PATH=$INSTALLER" >> $GITHUB_ENV
+          sha256sum "$INSTALLER"
+
+      # === Stage ===
+      # 安装包是自包含交付物；同时附上裸产物便于审计。
+      - name: Rename and move
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="${{ github.workspace }}/dist/FortFirewall-${{ env.FORT_VERSION }}-x64-${{ env.BUILD_DATE }}"
+          mkdir -p "$DEST"
+          cp "${{ env.INSTALLER_PATH }}" "$DEST/"
+          cp fort/build-win10/ui_bin/FortFirewall.exe "$DEST/FortFirewall-app.exe" || true
+          cp fort/build-driver-win10/x64/fortfw.sys "$DEST/" || true
+          find "$DEST" -type f | sort
+
+      # === Release（与 sumatrapdf 同一 action、同一真实路径）===
+      - name: Encrypt package and create release
+        uses: ./.github/actions/aes256pac_release/
+        with:
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          ZIP_COMPRESS_LEVEL: '9'
+          BUILD_ARTIFACT_PATH: "./dist/FortFirewall-${{ env.FORT_VERSION }}-x64-${{ env.BUILD_DATE }}"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-fort-${{ env.FORT_VERSION }}-x64"

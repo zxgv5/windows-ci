@@ -54,13 +54,15 @@ jobs:
       - name: Install bun
         uses: oven-sh/setup-bun@v2
 
-      # -rel = Release x64 build (NOT -ci: that mode expects the official
-      # repo's R2/BB upload secrets we don't have). Internally: msbuild
-      # vs2022\SumatraPDF.sln Release|x64. Output: out/rel64/.
+      # -rel = Release x64 build. build.ts issues msbuild with RELATIVE
+      # paths (vs2022\SumatraPDF.sln), so cwd MUST be the repo root —
+      # hence working-directory, not a path-prefixed command.
       - name: Build (Release x64)
-        run: bun .\sumatrapdf\cmd\build.ts -rel
+        run: bun .\cmd\build.ts -rel
+        working-directory: sumatrapdf
 
       # === Verify output (fail fast) ===
+      # Output is generated under the repo's cwd: sumatrapdf/out/rel64/
       - name: Verify output (x64)
         shell: bash
         run: |

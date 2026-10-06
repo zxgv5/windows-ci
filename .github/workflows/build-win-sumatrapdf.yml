@@ -13,7 +13,7 @@ jobs:
     # (detectVisualStudio2026). GA since May 2026, no special access needed.
     runs-on: windows-2025-vs2026
     steps:
-      # === Checkout SELF first (root) — brings ci_source/ with the
+      # === Checkout SELF first (root) — brings .github/actions/ with the
       # release action. Upstream goes to a subpath; root checkout of
       # upstream would clobber this.
       - name: Checkout CI repo (self)
@@ -24,7 +24,7 @@ jobs:
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
 
-      # === Upstream to subpath (NOT root — root would erase ci_source) ===
+      # === Upstream to subpath (NOT root — root would erase the action) ===
       # SumatraPDF is self-contained: all 3rd-party deps vendored in this
       # one repo. fetch-depth: 0 because build number / git describe need
       # history.
@@ -54,9 +54,10 @@ jobs:
       - name: Install bun
         uses: oven-sh/setup-bun@v2
 
-      # -rel = Release x64 build. build.ts issues msbuild with RELATIVE
-      # paths (vs2022\SumatraPDF.sln), so cwd MUST be the repo root —
-      # hence working-directory, not a path-prefixed command.
+      # -rel = Release x64 build (NOT -ci: that mode expects the official
+      # repo's R2/BB upload secrets we don't have). build.ts issues msbuild
+      # with RELATIVE paths (vs2022\SumatraPDF.sln), so cwd MUST be the
+      # repo root — hence working-directory, not a path-prefixed command.
       - name: Build (Release x64)
         run: bun .\cmd\build.ts -rel
         working-directory: sumatrapdf
@@ -92,8 +93,9 @@ jobs:
 
       # === Encrypt package and create release (Ventoy-style) ===
       - name: Encrypt package and create release
-        uses: ./ci_source/.github/actions/aes256pac_release_windows/
+        uses: ./.github/actions/aes256pac_release/
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          ZIP_COMPRESS_LEVEL: '9'
           BUILD_ARTIFACT_PATH: "./dist/SumatraPDF-${{ env.SUMATRA_VERSION }}-x64-${{ env.BUILD_DATE }}"
           RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-sumatrapdf-${{ env.SUMATRA_VERSION }}-x64"

@@ -88,9 +88,11 @@ jobs:
           cd fort
           set "QT_HOME=%QT_ROOT_DIR%"
           call src\scripts\i18n\release_ts.bat
+          rem release_ts.bat leaves cwd at src\ui (its internal cd has no pushd) — re-anchor
+          cd /d "%GITHUB_WORKSPACE%\fort"
           echo === .qm files generated ===
           dir /s /b src\ui\i18n\*.qm
-          if not errorlevel 1 echo QM_FILES_OK
+          echo QM_FILES_OK
 
       - name: Build UI (Release x64)
         shell: cmd

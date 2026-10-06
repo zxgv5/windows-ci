@@ -77,13 +77,32 @@ jobs:
           choco install innosetup -y
 
       # === Build 1: UI（Wiki 的 QtCreator 流程翻译为命令行）===
+      # === Translations: independent step, never chained with && ===
+      # release_ts.bat's cwd assumption is unknown to us (couldn't read
+      # its source beforehand) — running from repo root is the common
+      # convention; the `type` dump lets the NEXT log show its internals
+      # if this still fails.
+      - name: Generate translations
+        shell: cmd
+        run: |
+          cd fort
+          echo === release_ts.bat contents ===
+          type src\scripts\i18n\release_ts.bat
+          echo === running from repo root ===
+          call src\scripts\i18n\release_ts.bat
+          if errorlevel 1 echo ::warning::release_ts.bat exited %ERRORLEVEL% — see listing below
+          echo === .qm files generated ===
+          dir /s /b src\ui\i18n\*.qm 2>nul
+          if not errorlevel 1 echo QM_FILES_OK
+
       - name: Build UI (Release x64)
         shell: cmd
         run: |
           cd fort
-          cd src\scripts\i18n && call release_ts.bat && cd ..\..\..
           if not exist build-win10 mkdir build-win10
           cd build-win10
+          echo === confirm .pro location ===
+          dir ..\src\*.pro
           qmake ..\src\FortFirewall.pro
           nmake
 

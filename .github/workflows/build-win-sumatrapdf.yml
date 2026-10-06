@@ -1,0 +1,93 @@
+name: build-win-sumatrapdf
+
+on:
+  workflow_dispatch:
+
+env:
+  BUILD_DATE: ''
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    # Official CI uses this exact label: build.ts detects VS2026 internally
+    # (detectVisualStudio2026). GA since May 2026, no special access needed.
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Generate timestamp
+        shell: bash
+        run: |
+          echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+
+      # === Single checkout — SumatraPDF is self-contained ===
+      # All 3rd-party deps are vendored in this one repo; no sibling-repo
+      # dance, no submodule pinning, no NuGet packages.config.
+      # fetch-depth: 0 because build number / git describe need history.
+      - name: Checkout SumatraPDF
+        uses: actions/checkout@v5
+        with:
+          repository: sumatrapdfreader/sumatrapdf
+          ref: master
+          fetch-depth: 0
+
+      # === Version (best-effort from git tags) ===
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$VER" ]; then
+            VER="git-$(git rev-parse --short HEAD)"
+            echo "::notice::no tag reachable; falling back to $VER"
+          fi
+          echo "SUMATRA_VERSION=$VER" >> $GITHUB_ENV
+          echo "Version: $VER"
+
+      # === Official toolchain entry: bun + cmd/build.ts ===
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      # -rel = Release x64 build of SumatraPDF.exe (NOT -ci: that mode
+      # expects the official repo's R2/BB upload secrets we don't have).
+      # Internally: genDocsForBuild(), then msbuild vs2022\SumatraPDF.sln
+      # /p:Configuration=Release;Platform=x64, targets PdfFilter, PdfPreview,
+      # sumatrapdf-tool, SumatraPDF. Output: out/rel64/.
+      - name: Build (Release x64)
+        run: bun .\cmd\build.ts -rel
+
+      # === Verify output (fail fast) ===
+      # -rel produces out/rel64/SumatraPDF.exe plus its dynamic companions
+      # (libsumatrapdf.dll, PdfFilter.dll, PdfPreview.dll, sumatrapdf-tool.exe).
+      - name: Verify output (x64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s "out/rel64/SumatraPDF.exe" ]; then
+            echo "FATAL: out/rel64/SumatraPDF.exe missing"
+            echo "=== out/ contents ==="
+            find out -type f 2>/dev/null | head -50 || echo "(out/ does not exist)"
+            exit 1
+          fi
+          echo "=== Built ==="
+          ls -la out/rel64/
+          sha256sum out/rel64/SumatraPDF.exe
+
+      # === Rename and move (Ventoy-style) ===
+      # Copy the whole rel64 dir: SumatraPDF.exe needs its dll companions
+      # (libsumatrapdf.dll etc.) — they are dynamic dependencies, not optional.
+      - name: Rename and move
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="${{ github.workspace }}/dist/SumatraPDF-${{ env.SUMATRA_VERSION }}-x64-${{ env.BUILD_DATE }}"
+          mkdir -p "$DEST"
+          cp -r out/rel64/. "$DEST/"
+          echo "=== Staged package ==="
+          find "$DEST" -type f | sort
+
+      # === Encrypt package and create release (Ventoy-style) ===
+      - name: Encrypt package and create release
+        uses: ./ci_source/.github/actions/aes256pac_release_windows/
+        with:
+          ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
+          BUILD_ARTIFACT_PATH: "./dist/SumatraPDF-${{ env.SUMATRA_VERSION }}-x64-${{ env.BUILD_DATE }}"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-sumatrapdf-${{ env.SUMATRA_VERSION }}-x64"

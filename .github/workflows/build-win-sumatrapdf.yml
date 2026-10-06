@@ -13,20 +13,27 @@ jobs:
     # (detectVisualStudio2026). GA since May 2026, no special access needed.
     runs-on: windows-2025-vs2026
     steps:
+      # === Checkout SELF first (root) — brings ci_source/ with the
+      # release action. Upstream goes to a subpath; root checkout of
+      # upstream would clobber this.
+      - name: Checkout CI repo (self)
+        uses: actions/checkout@v5
+
       - name: Generate timestamp
         shell: bash
         run: |
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
 
-      # === Single checkout — SumatraPDF is self-contained ===
-      # All 3rd-party deps are vendored in this one repo; no sibling-repo
-      # dance, no submodule pinning, no NuGet packages.config.
-      # fetch-depth: 0 because build number / git describe need history.
+      # === Upstream to subpath (NOT root — root would erase ci_source) ===
+      # SumatraPDF is self-contained: all 3rd-party deps vendored in this
+      # one repo. fetch-depth: 0 because build number / git describe need
+      # history.
       - name: Checkout SumatraPDF
         uses: actions/checkout@v5
         with:
           repository: sumatrapdfreader/sumatrapdf
           ref: master
+          path: sumatrapdf
           fetch-depth: 0
 
       # === Version (best-effort from git tags) ===
@@ -34,6 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cd sumatrapdf
           VER=$(git describe --tags --abbrev=0 2>/dev/null || true)
           if [ -z "$VER" ]; then
             VER="git-$(git rev-parse --short HEAD)"
@@ -46,41 +54,37 @@ jobs:
       - name: Install bun
         uses: oven-sh/setup-bun@v2
 
-      # -rel = Release x64 build of SumatraPDF.exe (NOT -ci: that mode
-      # expects the official repo's R2/BB upload secrets we don't have).
-      # Internally: genDocsForBuild(), then msbuild vs2022\SumatraPDF.sln
-      # /p:Configuration=Release;Platform=x64, targets PdfFilter, PdfPreview,
-      # sumatrapdf-tool, SumatraPDF. Output: out/rel64/.
+      # -rel = Release x64 build (NOT -ci: that mode expects the official
+      # repo's R2/BB upload secrets we don't have). Internally: msbuild
+      # vs2022\SumatraPDF.sln Release|x64. Output: out/rel64/.
       - name: Build (Release x64)
-        run: bun .\cmd\build.ts -rel
+        run: bun .\sumatrapdf\cmd\build.ts -rel
 
       # === Verify output (fail fast) ===
-      # -rel produces out/rel64/SumatraPDF.exe plus its dynamic companions
-      # (libsumatrapdf.dll, PdfFilter.dll, PdfPreview.dll, sumatrapdf-tool.exe).
       - name: Verify output (x64)
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -s "out/rel64/SumatraPDF.exe" ]; then
-            echo "FATAL: out/rel64/SumatraPDF.exe missing"
+          if [ ! -s "sumatrapdf/out/rel64/SumatraPDF.exe" ]; then
+            echo "FATAL: sumatrapdf/out/rel64/SumatraPDF.exe missing"
             echo "=== out/ contents ==="
-            find out -type f 2>/dev/null | head -50 || echo "(out/ does not exist)"
+            find sumatrapdf/out -type f 2>/dev/null | head -50 || echo "(out/ does not exist)"
             exit 1
           fi
           echo "=== Built ==="
-          ls -la out/rel64/
-          sha256sum out/rel64/SumatraPDF.exe
+          ls -la sumatrapdf/out/rel64/
+          sha256sum sumatrapdf/out/rel64/SumatraPDF.exe
 
       # === Rename and move (Ventoy-style) ===
       # Copy the whole rel64 dir: SumatraPDF.exe needs its dll companions
-      # (libsumatrapdf.dll etc.) — they are dynamic dependencies, not optional.
+      # (libsumatrapdf.dll etc.) — dynamic dependencies, not optional.
       - name: Rename and move
         shell: bash
         run: |
           set -euo pipefail
           DEST="${{ github.workspace }}/dist/SumatraPDF-${{ env.SUMATRA_VERSION }}-x64-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
-          cp -r out/rel64/. "$DEST/"
+          cp -r sumatrapdf/out/rel64/. "$DEST/"
           echo "=== Staged package ==="
           find "$DEST" -type f | sort
 

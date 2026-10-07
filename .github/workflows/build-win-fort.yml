@@ -274,7 +274,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DEST="${{ github.workspace }}/dist/FortFirewall-${{ env.FORT_VERSION }}-x64-${{ env.BUILD_DATE }}"
+          DEST="${{ github.workspace }}/dist/fort-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
           cp "${{ env.INSTALLER_PATH }}" "$DEST/"
           cp fort/build-win10/ui_bin/FortFirewall.exe "$DEST/FortFirewall-app.exe" || true
@@ -287,5 +287,5 @@ jobs:
         with:
           ZIP_AES256_PWD: ${{ secrets.ZIP_AES256_PWD }}
           ZIP_COMPRESS_LEVEL: '9'
-          BUILD_ARTIFACT_PATH: "./dist/FortFirewall-${{ env.FORT_VERSION }}-x64-${{ env.BUILD_DATE }}"
-          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-fort-${{ env.FORT_VERSION }}-x64"
+          BUILD_ARTIFACT_PATH: "./dist/fort-${{ env.BUILD_DATE }}"
+          RELEASE_TAG_NAME: "${{ env.BUILD_DATE }}-fort"

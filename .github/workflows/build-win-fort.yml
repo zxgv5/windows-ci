@@ -70,20 +70,38 @@ jobs:
           "QT_DIR=$qtDir" | Out-File -Append $env:GITHUB_ENV
 
       # === Toolchain 3: WDK + Inno Setup ===
-      # WDK：choco 的 windowsdriverkit10（包元数据 19041）实际经 wdksetup
-      #   在线安装器装的是最新 WDK（26100），与镜像 SDK 26100 对齐——16:45
-      #   轮驱动构建成功即靠它。
-      # Inno Setup：镜像预装 6.7.1，须降级覆盖。根因：fort 的 .iss 按 Inno 5
-      #   语法写（作者本机 D:\Utils\Dev\InnoSetup5），Inno 6.6.0 (2025-11-11)
-      #   改了 CreateCustomForm 的函数原型，6.7.1 编到 [Code] 第 277 行即报
-      #   "Invalid number of parameters"。注意软件版本号 ≠ choco 包版本号：
-      #   社区仓库最新包就是 6.4.0（官方发过 6.4.1/6.4.2 但包维护者未跟进）。
-      #   6.4.0 < 6.6.0 满足兼容约束。
-      - name: Install WDK and downgrade Inno Setup (pre-6.6)
+      # WDK：choco 的 windowsdriverkit10 实际经 wdksetup 在线安装器装最新
+      #   WDK（26100），与镜像 SDK 对齐（16:45 轮驱动构建成功即靠它）。
+      # Inno Setup：fort 的 .iss 落在很窄的版本窗口 ——
+      #   277 行 CreateCustomForm() 0 参调用 ⇒ 需 <6.6.0（6.6.0 起原型变更）；
+      #   284 行 Form.Center ⇒ 6.4.0 无此成员（05:39 轮实锤）。
+      #   两者同时成立 ⇒ 唯有 6.5.x 系列 ⇒ 钉末版 6.5.4。
+      #   choco 仓库无 6.5.x（最新包 6.4.0，2025-01 后未跟进）⇒ 官方安装器
+      #   直装（静默参数照抄 choco 包的 chocolateyInstall.ps1）。
+      - name: Install WDK and pin Inno Setup 6.5.4
         shell: pwsh
         run: |
           choco install windowsdriverkit10 -y
-          choco install innosetup --version=6.4.0 -y --allow-downgrade --force
+          $innoDir = "C:\Program Files (x86)\Inno Setup 6"
+          # 先卸镜像预装的 6.7.1（unins000 会自我复制后再运行，轮询等它删完自己）
+          $unins = Join-Path $innoDir "unins000.exe"
+          if (Test-Path $unins) {
+            Start-Process $unins -ArgumentList "/SILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Test-Path $unins) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }
+          }
+          # 官方静默装 6.5.4；files.jrsoftware.org 失败则回退 GitHub 不可变 release
+          $dst = "$env:TEMP\innosetup-6.5.4.exe"
+          try {
+            Invoke-WebRequest "https://files.jrsoftware.org/is/6/innosetup-6.5.4.exe" -OutFile $dst
+          } catch {
+            Invoke-WebRequest "https://github.com/jrsoftware/issrc/releases/download/is-6_5_4/innosetup-6.5.4.exe" -OutFile $dst
+          }
+          Start-Process $dst -ArgumentList "/SILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
+          # 版本自检：必须 6.5.4
+          $v = (Get-Item (Join-Path $innoDir "ISCC.exe")).VersionInfo.ProductVersion
+          Write-Host "ISCC version: $v"
+          if ($v -notlike "6.5.4*") { throw "expected Inno 6.5.4, got '$v'" }
 
       # === Translations ===
       # release_ts.bat 期望 QT_HOME 环境变量（作者本机全局设了，文件内赋值

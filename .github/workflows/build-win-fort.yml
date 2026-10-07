@@ -71,9 +71,10 @@ jobs:
 
       # === Toolchain 3: WDK + Inno Setup ===
       # WDK：choco 的 windowsdriverkit10 经 wdksetup 装最新 WDK（26100）。
-      # Inno Setup 6.5.4（.iss 需 6.5.x 窗口期）。验证用 ISCC banner——
-      # ISCC.exe 的 PE 版本资源恒为 0.0.0.0（10:59 轮实锤，exit 0 安装成功
-      # 但 VersionInfo 读不出），banner 是唯一可靠来源。
+      # Inno Setup 6.5.4：.iss 需 6.5.x 窗口期（<6.6.0 的 CreateCustomForm
+      #   原型 + ≥6.5 的 TSetupForm.Center）。choco 无 6.5.x，官方安装器直装。
+      #   版本验证：编译空壳脚本读 banner——ISCC 的 PE 版本资源恒为
+      #   0.0.0.0，/帮助 只显示主版本，都不带小版本。
       - name: Install WDK and pin Inno Setup 6.5.4
         shell: pwsh
         run: |
@@ -96,7 +97,7 @@ jobs:
           }
           $p = Start-Process $dst -ArgumentList "/SILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -PassThru -Wait
           Write-Host "installer exit code: $($p.ExitCode)"
-          # --- 诊断 dump：目录内容（区分"没装上"与"装上了"） ---
+          # --- 诊断 dump：目录内容（确认安装完整性） ---
           Write-Host "=== Inno directory contents ==="
           if (Test-Path $innoDir) {
             Get-ChildItem $innoDir | Select-Object Name, Length | Format-Table | Out-String | Write-Host
@@ -105,16 +106,28 @@ jobs:
           }
           $iscc = Join-Path $innoDir "ISCC.exe"
           if (-not (Test-Path $iscc)) { throw "ISCC.exe not found - see directory dump above" }
-          # --- 版本判定：banner 权威 ---
-          $banner = (& $iscc "/?" 2>&1 | Out-String)
-          Write-Host "=== ISCC banner ==="
-          Write-Host $banner
-          if ($banner -match 'Inno Setup\s+([\d\.]+)') {
+          # --- 版本判定：编译极简脚本，从 banner 解析 ---
+          # ISCC 的 PE 版本资源恒为 0.0.0.0（10:59/11:13 轮实锤）；
+          # ISCC /? 只显示主版本 "6"（11:13 轮实锤）；
+          # 唯一可靠来源是实际编译时的 "Compiler engine version" 行。
+          $testIss = "$env:TEMP\version_check.iss"
+          @(
+            '[Setup]'
+            'AppName=VC'
+            'AppVersion=1.0'
+            'DefaultDirName={autopf}\VC'
+            'OutputBaseFilename=vc_test'
+          ) | Set-Content $testIss -Encoding ASCII
+          $compileOutput = & $iscc $testIss 2>&1 | Out-String
+          Remove-Item $testIss, "$env:TEMP\vc_test.exe" -ErrorAction SilentlyContinue
+          Write-Host "=== ISCC test compile output ==="
+          Write-Host $compileOutput
+          if ($compileOutput -match 'Compiler engine version:\s*Inno Setup\s+([\d\.]+)') {
             $v = $Matches[1]
-            Write-Host "ISCC banner version: $v"
-            if ($v -notlike "6.5.4*") { throw "expected Inno 6.5.4, banner says '$v'" }
+            Write-Host "Inno version: $v"
+            if ($v -notlike "6.5.4*") { throw "expected Inno 6.5.4, got '$v'" }
           } else {
-            throw "could not parse version from ISCC banner"
+            throw "could not parse version from ISCC test compile output"
           }
 
       # === Translations ===

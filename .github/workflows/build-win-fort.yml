@@ -69,13 +69,17 @@ jobs:
           $qtDir = Split-Path (Split-Path $qmake)   # ...\6.8.x\msvc2022_64
           "QT_DIR=$qtDir" | Out-File -Append $env:GITHUB_ENV
 
-      # === Toolchain 3: WDK + Inno Setup（runner 均不预装）===
-      # FIX: Inno 钉 6.4.2（≤6.5 即可）。根因：fort 的 .iss 按 Inno 5 语法
-      # 写（作者本机 D:\Utils\Dev\InnoSetup5），Inno 6.6.0 (2025-11-11) 改了
-      # CreateCustomForm 的函数原型，6.7.1 编到 [Code] 第 277 行即报
-      # "Invalid number of parameters"。若 choco 无此版本号，跑
-      # choco search innosetup --exact --all-versions 选任一 ≤6.5 的版本。
-      - name: Install WDK and Inno Setup (pre-6.6)
+      # === Toolchain 3: WDK + Inno Setup ===
+      # WDK：choco 的 windowsdriverkit10（包元数据 19041）实际经 wdksetup
+      #   在线安装器装的是最新 WDK（26100），与镜像 SDK 26100 对齐——16:45
+      #   轮驱动构建成功即靠它。
+      # Inno Setup：镜像预装 6.7.1，须降级覆盖。根因：fort 的 .iss 按 Inno 5
+      #   语法写（作者本机 D:\Utils\Dev\InnoSetup5），Inno 6.6.0 (2025-11-11)
+      #   改了 CreateCustomForm 的函数原型，6.7.1 编到 [Code] 第 277 行即报
+      #   "Invalid number of parameters"。注意软件版本号 ≠ choco 包版本号：
+      #   社区仓库最新包就是 6.4.0（官方发过 6.4.1/6.4.2 但包维护者未跟进）。
+      #   6.4.0 < 6.6.0 满足兼容约束。
+      - name: Install WDK and downgrade Inno Setup (pre-6.6)
         shell: pwsh
         run: |
           choco install windowsdriverkit10 -y
@@ -108,26 +112,21 @@ jobs:
           nmake
           if errorlevel 1 exit 1
 
-      # === Drivers ===
-      # FIX: 双驱动构建。deployment.json 的 win10 配置同时打包两份驱动：
-      #   build-driver-win7\x64\fortfw.sys  → 装入 driver\x86_64_old\（legacy）
-      #   build-driver-win10\x64\fortfw.sys → 装入 driver\x86_64\
-      # 上轮只编了 win10 份，win7 份 Copy-Item 报错。
-      # dir 列出真实 bat 名自检：msvcbuild-win7-64.bat 名称是按官方命名
-      # 规律推定的，若不符日志里一眼可见。
-      - name: Build drivers (win7 + win10, x64)
+      # === Driver（win10 x64 only）===
+      # win7 驱动已移除：wdksetup 装的 WDK 26100 拒绝 TargetVersion=
+      # WindowsV6.3（03:09 轮实锤），而 Wiki 要求 WDK 与 VS SDK 同版本，
+      # 即作者文档化的工具链同样造不出 win7 驱动（Wiki 驱动章节也只记载
+      # win10 构建法）。UI 是 Qt 6.8.3（Win10+），legacy 驱动在本构建中
+      # 无目标系统可言——由下方 deployment.json 补丁将其从安装包剔除。
+      - name: Build driver (win10, x64)
         shell: cmd
         run: |
           cd fort\src\driver
-          echo === available driver build scripts ===
-          dir /b msvcbuild*.bat
-          call msvcbuild-win7-64.bat
-          if errorlevel 1 exit 1
           call msvcbuild-win10-64.bat
           if errorlevel 1 exit 1
 
       # === Patch: create-installer.bat 的 INNO_PATH 是硬编码的作者本地路径 ===
-      # 上轮已验证 ISCC.exe 经 choco 的 PATH shim 可直接执行。
+      # 已验证 ISCC.exe 经 PATH shim 可直接执行（含降级覆盖后同样成立）。
       - name: Patch installer path
         shell: pwsh
         run: |
@@ -135,9 +134,28 @@ jobs:
           (Get-Content $f) -replace 'set INNO_PATH=.*', 'set INNO_PATH=ISCC.exe' |
             Set-Content $f
 
+      # === Patch: 从部署清单剔除 win7 legacy 驱动 ===
+      # 正则按"键含 x86_64_old"宽容匹配（键的确切格式未经逐字节核对，
+      # dump 前置保证万一不匹配时日志直接可见真实布局）；
+      # 找不到条目或补丁后 JSON 非法均显式 throw——宁可大声失败，
+      # 不可静默漏掉。
+      - name: Drop legacy win7 driver from deployment
+        shell: pwsh
+        run: |
+          $f = "fort\deploy\deployment.json"
+          Write-Host "=== deployment.json (before patch) ==="
+          Get-Content $f | Select-Object -First 60 | Write-Host
+          $raw = Get-Content $f -Raw
+          $patched = $raw -replace '(?s)"[^"]*x86_64_old[^"]*"\s*:\s*\{.*?\},\s*', ''
+          if ($patched -eq $raw) { throw "x86_64_old entry not found - see dump above" }
+          try { $null = $patched | ConvertFrom-Json }
+          catch { throw "patched deployment.json is not valid JSON: $_" }
+          Set-Content $f $patched -NoNewline
+          Write-Host "=== x86_64_old entry removed ==="
+
       # === Deploy + Installer（官方脚本）===
-      # FIX 1: -BuildPath 改为 "..\build"（即默认值）。${BUILD} 是模板前缀，
-      #   传 "..\build-win10" 会拼出 "..\build-win10-win10\..."（上轮实锤）。
+      # FIX 1: -BuildPath 为 "..\build"（即默认值）。${BUILD} 是模板前缀，
+      #   传 "..\build-win10" 会拼出 "..\build-win10-win10\..."（01:19 轮实锤）。
       # FIX 2: windeployqt 铺共享版 Qt 运行时。deployment.json 是按静态 Qt
       #   写的（零 Qt 条目），我们链接的是共享版，不补则装出的应用缺
       #   Qt6*.dll 无法启动。.iss 的 Source:"build\*" 带 recursesubdirs，
@@ -155,8 +173,9 @@ jobs:
           if errorlevel 1 exit 1
 
       # === Verify（fail fast）===
-      # FIX: 双驱动都验证；安装包列出体积供肉眼核对（windeployqt 后应明显
-      # 大于上轮的 3.5MB 裸 exe 级别）。
+      # 单驱动（win10）；列出部署树核对 Qt 运行时是否入包（应有 Qt6*.dll、
+      # platforms/ 等；缺了即 windeployqt 未生效）；安装包体积应在 15-25MB
+      # 区间而非 4MB 裸 exe 级别。
       - name: Verify output
         shell: bash
         run: |
@@ -165,8 +184,6 @@ jobs:
           ls -la fort/build-win10/ui_bin/FortFirewall.exe
           echo "=== Driver (win10) ==="
           ls -la fort/build-driver-win10/x64/fortfw.sys
-          echo "=== Driver (win7 legacy) ==="
-          ls -la fort/build-driver-win7/x64/fortfw.sys
           echo "=== Deployed build tree (Qt runtime present?) ==="
           ls fort/deploy/build/
           echo "=== Installer ==="
@@ -190,7 +207,6 @@ jobs:
           cp "${{ env.INSTALLER_PATH }}" "$DEST/"
           cp fort/build-win10/ui_bin/FortFirewall.exe "$DEST/FortFirewall-app.exe" || true
           cp fort/build-driver-win10/x64/fortfw.sys "$DEST/fortfw-win10.sys" || true
-          cp fort/build-driver-win7/x64/fortfw.sys "$DEST/fortfw-win7.sys" || true
           find "$DEST" -type f | sort
 
       # === Release（与 sumatrapdf 同一 action、同一真实路径）===

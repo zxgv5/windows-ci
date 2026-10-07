@@ -128,6 +128,8 @@ jobs:
         run: |
           cd fort\deploy
           call setup-deployment.bat -Config win10 -QtPath "%QT_DIR%" -BuildPath "..\build-win10"
+          if errorlevel 1 exit 1
+          call create-installer.bat
 
       # === Verify（fail fast）===
       - name: Verify output

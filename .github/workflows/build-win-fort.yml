@@ -71,37 +71,49 @@ jobs:
 
       # === Toolchain 3: WDK + Inno Setup ===
       # WDK：choco 的 windowsdriverkit10 实际经 wdksetup 在线安装器装最新
-      #   WDK（26100），与镜像 SDK 对齐（16:45 轮驱动构建成功即靠它）。
-      # Inno Setup：fort 的 .iss 落在很窄的版本窗口 ——
-      #   277 行 CreateCustomForm() 0 参调用 ⇒ 需 <6.6.0（6.6.0 起原型变更）；
-      #   284 行 Form.Center ⇒ 6.4.0 无此成员（05:39 轮实锤）。
-      #   两者同时成立 ⇒ 唯有 6.5.x 系列 ⇒ 钉末版 6.5.4。
-      #   choco 仓库无 6.5.x（最新包 6.4.0，2025-01 后未跟进）⇒ 官方安装器
-      #   直装（静默参数照抄 choco 包的 chocolateyInstall.ps1）。
+      #   WDK（26100），与镜像 SDK 对齐。
+      # Inno Setup：.iss 需 6.5.x（<6.6.0 的 CreateCustomForm 原型 + ≥6.5 的
+      #   TSetupForm.Center），钉末版 6.5.4。官方安装器直装（choco 无此版）。
+      #   教训：Start-Process -Wait 只等主 exe，Inno 安装器有子进程机制，
+      #   必须轮询到 ISCC.exe 版本资源就绪。
       - name: Install WDK and pin Inno Setup 6.5.4
         shell: pwsh
         run: |
           choco install windowsdriverkit10 -y
           $innoDir = "C:\Program Files (x86)\Inno Setup 6"
-          # 先卸镜像预装的 6.7.1（unins000 会自我复制后再运行，轮询等它删完自己）
+          # --- 卸载镜像预装的 6.7.1，等整个目录清空 ---
           $unins = Join-Path $innoDir "unins000.exe"
           if (Test-Path $unins) {
             Start-Process $unins -ArgumentList "/SILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-            $deadline = (Get-Date).AddSeconds(30)
-            while ((Test-Path $unins) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }
+            $deadline = (Get-Date).AddSeconds(60)
+            while ((Test-Path $innoDir) -and ((Get-Date) -lt $deadline)) {
+              Start-Sleep -Milliseconds 500
+            }
+            if (Test-Path $innoDir) { throw "uninstall of preinstalled Inno did not finish in 60s" }
           }
-          # 官方静默装 6.5.4；files.jrsoftware.org 失败则回退 GitHub 不可变 release
+          # --- 官方静默装 6.5.4（主源 + GitHub 回退） ---
           $dst = "$env:TEMP\innosetup-6.5.4.exe"
           try {
             Invoke-WebRequest "https://files.jrsoftware.org/is/6/innosetup-6.5.4.exe" -OutFile $dst
           } catch {
             Invoke-WebRequest "https://github.com/jrsoftware/issrc/releases/download/is-6_5_4/innosetup-6.5.4.exe" -OutFile $dst
           }
-          Start-Process $dst -ArgumentList "/SILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
-          # 版本自检：必须 6.5.4
-          $v = (Get-Item (Join-Path $innoDir "ISCC.exe")).VersionInfo.ProductVersion
+          $p = Start-Process $dst -ArgumentList "/SILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -PassThru -Wait
+          Write-Host "installer exit code: $($p.ExitCode)"
+          # --- 等 ISCC.exe 的版本资源真正就绪（安装器子进程可能仍在收尾） ---
+          $iscc = Join-Path $innoDir "ISCC.exe"
+          $deadline = (Get-Date).AddSeconds(60)
+          $v = "0.0.0.0"
+          while (((Get-Date) -lt $deadline)) {
+            if (Test-Path $iscc) {
+              $v = (Get-Item $iscc).VersionInfo.ProductVersion
+              if ($v -and $v -ne "0.0.0.0") { break }
+            }
+            Start-Sleep -Milliseconds 500
+          }
           Write-Host "ISCC version: $v"
           if ($v -notlike "6.5.4*") { throw "expected Inno 6.5.4, got '$v'" }
+
 
       # === Translations ===
       # release_ts.bat 期望 QT_HOME 环境变量（作者本机全局设了，文件内赋值
@@ -144,12 +156,14 @@ jobs:
           if errorlevel 1 exit 1
 
       # === Patch: create-installer.bat 的 INNO_PATH 是硬编码的作者本地路径 ===
-      # 已验证 ISCC.exe 经 PATH shim 可直接执行（含降级覆盖后同样成立）。
+      # 绝对路径 + 8.3 短名（绕 bat 空格转义），不依赖 PATH shim——
+      # 卸 6.7.1 装 6.5.4 后 shim 指向性存疑，直接锚死安装位置。
       - name: Patch installer path
         shell: pwsh
         run: |
           $f = "fort\deploy\create-installer.bat"
-          (Get-Content $f) -replace 'set INNO_PATH=.*', 'set INNO_PATH=ISCC.exe' |
+          (Get-Content $f) -replace 'set INNO_PATH=.*',
+            'set INNO_PATH=C:\Progra~2\Inno Setup 6\ISCC.exe' |
             Set-Content $f
 
       # === Patch: 从部署清单剔除 win7 legacy 驱动 ===

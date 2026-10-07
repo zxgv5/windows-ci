@@ -204,6 +204,7 @@ jobs:
       # fort 的 AskPassword()（卸载密码框）用了 Inno 5 的 TSetupForm.Center；
       # 作者本机即 InnoSetup5，master 的 .iss 从未兼容过 Inno 6。
       # 全文仅此一处使用；用 GetSystemMetrics 手动居中，功能等价。
+      # 注意：.NET 正则 (?m) 模式下 $ 不匹配 \r（CRLF 文件），须显式 \r?。
       - name: Patch Inno 6 compatibility (Form.Center)
         shell: pwsh
         run: |
@@ -215,12 +216,13 @@ jobs:
           $decl = "function GetSystemMetrics(nIndex: Integer): Integer;`r`nexternal 'GetSystemMetrics@user32.dll stdcall';`r`n`r`n"
           $c = $c.Replace($anchor, $decl + $anchor)
           # 2) Form.Center; → 屏幕居中（SM_CXSCREEN=0 / SM_CYSCREEN=1）
-          $n = [regex]::Matches($c, '(?m)^[ \t]*Form\.Center;[ \t]*$').Count
+          $n = [regex]::Matches($c, '(?m)^[ \t]*Form\.Center;[ \t]*\r?$').Count
           if ($n -ne 1) { throw "expected 1 'Form.Center;', found $n" }
-          $c = [regex]::Replace($c, '(?m)^([ \t]*)Form\.Center;[ \t]*$',
+          $c = [regex]::Replace($c, '(?m)^([ \t]*)Form\.Center;[ \t]*\r?$',
             "`${1}Form.Left := (GetSystemMetrics(0) - Form.Width) div 2;`r`n`${1}Form.Top := (GetSystemMetrics(1) - Form.Height) div 2;")
           Set-Content $f $c -NoNewline
           Write-Host "Form.Center patched to manual centering"
+
 
       # === Deploy + Installer（官方脚本）===
       # FIX 1: -BuildPath 为 "..\build"（即默认值）。${BUILD} 是模板前缀，

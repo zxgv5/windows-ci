@@ -53,11 +53,12 @@ jobs:
 
       # === Toolchain 2: Qt 6（官方预编译 MSVC x64）===
       # Wiki 流程是从源码静态编 Qt（qt-build.bat，数小时）——CI 用 aqt 预编译
-      # 是务实替代。共享/静态链接差异可能影响部署清单，见文首风险点 2。
+      # 是务实替代。共享链接的运行时依赖由部署阶段的 windeployqt 补齐（见
+      # Deploy 步骤内注释）。
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.*'          # 按 fort 当前要求微调
+          version: '6.8.*'
           arch: win64_msvc2022_64
           cache: true
 
@@ -69,26 +70,29 @@ jobs:
           "QT_DIR=$qtDir" | Out-File -Append $env:GITHUB_ENV
 
       # === Toolchain 3: WDK + Inno Setup（runner 均不预装）===
-      # 风险点 1/3：包名与版本需首跑核实；WDK 版本必须与镜像 SDK 对齐。
-      - name: Install WDK and Inno Setup
+      # FIX: Inno 钉 6.4.2（≤6.5 即可）。根因：fort 的 .iss 按 Inno 5 语法
+      # 写（作者本机 D:\Utils\Dev\InnoSetup5），Inno 6.6.0 (2025-11-11) 改了
+      # CreateCustomForm 的函数原型，6.7.1 编到 [Code] 第 277 行即报
+      # "Invalid number of parameters"。若 choco 无此版本号，跑
+      # choco search innosetup --exact --all-versions 选任一 ≤6.5 的版本。
+      - name: Install WDK and Inno Setup (pre-6.6)
         shell: pwsh
         run: |
           choco install windowsdriverkit10 -y
-          choco install innosetup -y
+          choco install innosetup --version=6.4.2 --allow-downgrade --force -y
 
-      # === Build 1: UI（Wiki 的 QtCreator 流程翻译为命令行）===
       # === Translations ===
-      # release_ts.bat expects QT_HOME env (author's local machine has it set
-      # system-wide; the in-file assignment is commented out). The bat is
-      # self-anchoring (%~dp0), so caller cwd doesn't matter — verified by
-      # the source dump in the 13:22 run.
+      # release_ts.bat 期望 QT_HOME 环境变量（作者本机全局设了，文件内赋值
+      # 被注释）。bat 以 %~dp0 自锚定，调用者 cwd 无关（13:22 run 的源码
+      # dump 已验证）。但 call 结束后 cwd 停在 src\ui（其内部 cd 无 pushd），
+      # 必须重新锚定再做验证。
       - name: Generate translations
         shell: cmd
         run: |
           cd fort
           set "QT_HOME=%QT_ROOT_DIR%"
           call src\scripts\i18n\release_ts.bat
-          rem release_ts.bat leaves cwd at src\ui (its internal cd has no pushd) — re-anchor
+          rem release_ts.bat leaves cwd at src\ui — re-anchor
           cd /d "%GITHUB_WORKSPACE%\fort"
           echo === .qm files generated ===
           dir /s /b src\ui\i18n\*.qm
@@ -100,19 +104,30 @@ jobs:
           cd fort
           if not exist build-win10 mkdir build-win10
           cd build-win10
-          echo === confirm .pro location ===
-          dir ..\src\*.pro
           qmake ..\src\FortFirewall.pro
           nmake
+          if errorlevel 1 exit 1
 
-      # === Build 2: Driver ===
-      - name: Build driver (x64)
+      # === Drivers ===
+      # FIX: 双驱动构建。deployment.json 的 win10 配置同时打包两份驱动：
+      #   build-driver-win7\x64\fortfw.sys  → 装入 driver\x86_64_old\（legacy）
+      #   build-driver-win10\x64\fortfw.sys → 装入 driver\x86_64\
+      # 上轮只编了 win10 份，win7 份 Copy-Item 报错。
+      # dir 列出真实 bat 名自检：msvcbuild-win7-64.bat 名称是按官方命名
+      # 规律推定的，若不符日志里一眼可见。
+      - name: Build drivers (win7 + win10, x64)
         shell: cmd
         run: |
           cd fort\src\driver
+          echo === available driver build scripts ===
+          dir /b msvcbuild*.bat
+          call msvcbuild-win7-64.bat
+          if errorlevel 1 exit 1
           call msvcbuild-win10-64.bat
+          if errorlevel 1 exit 1
 
       # === Patch: create-installer.bat 的 INNO_PATH 是硬编码的作者本地路径 ===
+      # 上轮已验证 ISCC.exe 经 choco 的 PATH shim 可直接执行。
       - name: Patch installer path
         shell: pwsh
         run: |
@@ -121,25 +136,40 @@ jobs:
             Set-Content $f
 
       # === Deploy + Installer（官方脚本）===
-      # -QtPath 覆盖为 aqt 的 Qt 目录（ps1 支持命名参数）；
-      # 若部署报缺文件，见风险点 2/4 的处置说明。
+      # FIX 1: -BuildPath 改为 "..\build"（即默认值）。${BUILD} 是模板前缀，
+      #   传 "..\build-win10" 会拼出 "..\build-win10-win10\..."（上轮实锤）。
+      # FIX 2: windeployqt 铺共享版 Qt 运行时。deployment.json 是按静态 Qt
+      #   写的（零 Qt 条目），我们链接的是共享版，不补则装出的应用缺
+      #   Qt6*.dll 无法启动。.iss 的 Source:"build\*" 带 recursesubdirs，
+      #   windeployqt 铺的插件子目录会被一并收进安装包。
+      #   --no-translations：qtbase 翻译已由 release_ts.bat 合并入 i18n_*.qm。
       - name: Deploy and create installer
         shell: cmd
         run: |
           cd fort\deploy
-          call setup-deployment.bat -Config win10 -QtPath "%QT_DIR%" -BuildPath "..\build-win10"
+          call setup-deployment.bat -Config win10 -QtPath "%QT_DIR%" -BuildPath "..\build"
+          if errorlevel 1 exit 1
+          "%QT_DIR%\bin\windeployqt.exe" --release --no-translations --dir build ..\build-win10\ui_bin\FortFirewall.exe
           if errorlevel 1 exit 1
           call create-installer.bat
+          if errorlevel 1 exit 1
 
       # === Verify（fail fast）===
+      # FIX: 双驱动都验证；安装包列出体积供肉眼核对（windeployqt 后应明显
+      # 大于上轮的 3.5MB 裸 exe 级别）。
       - name: Verify output
         shell: bash
         run: |
           set -euo pipefail
           echo "=== UI ==="
           ls -la fort/build-win10/ui_bin/FortFirewall.exe
-          echo "=== Driver ==="
+          echo "=== Driver (win10) ==="
           ls -la fort/build-driver-win10/x64/fortfw.sys
+          echo "=== Driver (win7 legacy) ==="
+          ls -la fort/build-driver-win7/x64/fortfw.sys
+          echo "=== Deployed build tree (Qt runtime present?) ==="
+          ls fort/deploy/build/
+          echo "=== Installer ==="
           INSTALLER=$(find fort/deploy/out -name "FortFirewall-*.exe" | head -1)
           if [ -z "$INSTALLER" ]; then
             echo "FATAL: installer missing under fort/deploy/out"
@@ -159,7 +189,8 @@ jobs:
           mkdir -p "$DEST"
           cp "${{ env.INSTALLER_PATH }}" "$DEST/"
           cp fort/build-win10/ui_bin/FortFirewall.exe "$DEST/FortFirewall-app.exe" || true
-          cp fort/build-driver-win10/x64/fortfw.sys "$DEST/" || true
+          cp fort/build-driver-win10/x64/fortfw.sys "$DEST/fortfw-win10.sys" || true
+          cp fort/build-driver-win7/x64/fortfw.sys "$DEST/fortfw-win7.sys" || true
           find "$DEST" -type f | sort
 
       # === Release（与 sumatrapdf 同一 action、同一真实路径）===

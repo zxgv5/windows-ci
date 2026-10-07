@@ -200,6 +200,28 @@ jobs:
           Set-Content $f $patched -NoNewline
           Write-Host "=== x86_64_old entry removed ==="
 
+      # === Patch: Inno 6 兼容 — Form.Center 已被 Inno 6 移除 ===
+      # fort 的 AskPassword()（卸载密码框）用了 Inno 5 的 TSetupForm.Center；
+      # 作者本机即 InnoSetup5，master 的 .iss 从未兼容过 Inno 6。
+      # 全文仅此一处使用；用 GetSystemMetrics 手动居中，功能等价。
+      - name: Patch Inno 6 compatibility (Form.Center)
+        shell: pwsh
+        run: |
+          $f = "fort\deploy\FortFirewall.iss"
+          $c = Get-Content $f -Raw
+          # 1) AskPassword 前插入 user32 外部声明
+          $anchor = "function AskPassword(): String;"
+          if ($c -notmatch [regex]::Escape($anchor)) { throw "AskPassword anchor not found" }
+          $decl = "function GetSystemMetrics(nIndex: Integer): Integer;`r`nexternal 'GetSystemMetrics@user32.dll stdcall';`r`n`r`n"
+          $c = $c.Replace($anchor, $decl + $anchor)
+          # 2) Form.Center; → 屏幕居中（SM_CXSCREEN=0 / SM_CYSCREEN=1）
+          $n = [regex]::Matches($c, '(?m)^[ \t]*Form\.Center;[ \t]*$').Count
+          if ($n -ne 1) { throw "expected 1 'Form.Center;', found $n" }
+          $c = [regex]::Replace($c, '(?m)^([ \t]*)Form\.Center;[ \t]*$',
+            "`${1}Form.Left := (GetSystemMetrics(0) - Form.Width) div 2;`r`n`${1}Form.Top := (GetSystemMetrics(1) - Form.Height) div 2;")
+          Set-Content $f $c -NoNewline
+          Write-Host "Form.Center patched to manual centering"
+
       # === Deploy + Installer（官方脚本）===
       # FIX 1: -BuildPath 为 "..\build"（即默认值）。${BUILD} 是模板前缀，
       #   传 "..\build-win10" 会拼出 "..\build-win10-win10\..."（01:19 轮实锤）。
@@ -215,6 +237,7 @@ jobs:
           call setup-deployment.bat -Config win10 -QtPath "%QT_DIR%" -BuildPath "..\build"
           if errorlevel 1 exit 1
           "%QT_DIR%\bin\windeployqt.exe" --release --no-translations --dir build ..\build-win10\ui_bin\FortFirewall.exe
+          xcopy /y "%VCToolsRedistDir%x64\Microsoft.VC143.CRT\*.dll" build\
           if errorlevel 1 exit 1
           call create-installer.bat
           if errorlevel 1 exit 1

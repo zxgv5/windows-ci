@@ -2,6 +2,16 @@ name: build-win-ahk
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: '构建分支（alpha 的 Self-contained 因上游回归暂不可用）'
+        required: true
+        default: 'v2.0'
+        type: choice
+        options:
+          - v2.0
+          - alpha
+          - v1.1
 
 jobs:
   build:
@@ -12,7 +22,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: AutoHotkey/AutoHotkey
-          ref: alpha
+          ref: ${{ inputs.branch }}
           path: ahk_source
           fetch-depth: 0
           submodules: recursive
@@ -29,6 +39,11 @@ jobs:
         working-directory: ahk_source
         run: msbuild AutoHotkeyx.sln /p:Configuration=Release /p:Platform=x64 /m /v:m /nologo
 
+      # alpha 分支的 SC 代码路径有上游回归（script.cpp 的模块化改造漏加
+      - name: Build Self-contained x64
+        working-directory: ahk_source
+        run: msbuild AutoHotkeyx.sln /p:Configuration=Self-contained /p:Platform=x64 /m /v:m /nologo
+
       - name: Generate timestamp
         shell: bash
         run: echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
@@ -40,11 +55,13 @@ jobs:
           DEST="${{ github.workspace }}/dist/ahk-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
           cd ahk_source
+          # 主程序（v2 为 AutoHotkey64.exe，v1.1 为 AutoHotkeyU64.exe，通配符兜两者）
           if ! ls bin/AutoHotkey*64.exe >/dev/null 2>&1; then
             echo "::error::AutoHotkey x64 exe not found under bin/" >&2
             exit 1
           fi
           cp bin/AutoHotkey*64.exe "$DEST/"
+          cp bin_minimal/AutoHotkey*.bin "$DEST/" || true
           cp LICENSE "$DEST/" || true
           find "$DEST" -type f | sort
 

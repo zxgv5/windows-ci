@@ -12,7 +12,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: AutoHotkey/AutoHotkey
-          ref: master
+          # ref: v2.0
+          ref: alpha
           path: ahk_source
           fetch-depth: 0
           submodules: recursive
@@ -33,6 +34,14 @@ jobs:
         working-directory: ahk_source
         run: msbuild AutoHotkeyx.sln /p:Configuration=Self-contained /p:Platform=x64 /m /v:m /nologo
 
+      - name: List build outputs
+        shell: bash
+        run: |
+          echo "=== bin/ ==="
+          ls -la ahk_source/bin/ 2>/dev/null || echo "(no bin/ dir)"
+          echo "=== bin_minimal/ ==="
+          ls -la ahk_source/bin_minimal/ 2>/dev/null || echo "(no bin_minimal/ dir)"
+
       - name: Generate timestamp
         shell: bash
         run: echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
@@ -44,14 +53,12 @@ jobs:
           DEST="${{ github.workspace }}/dist/ahk-${{ env.BUILD_DATE }}"
           mkdir -p "$DEST"
           cd ahk_source
-          # 主程序（v2 分支为 AutoHotkey64.exe，v1.1 分支为 AutoHotkeyU64.exe，通配符兜两者）
           if ! ls bin/AutoHotkey*64.exe >/dev/null 2>&1; then
             echo "::error::AutoHotkey x64 exe not found under bin/" >&2
             exit 1
           fi
           cp bin/AutoHotkey*64.exe "$DEST/"
-          # 自包含运行时（供 Ahk2Exe 嵌入）
-          cp bin/AutoHotkeySC*.bin "$DEST/" || true
+          cp bin_minimal/AutoHotkey*.bin "$DEST/" || true
           cp LICENSE "$DEST/" || true
           find "$DEST" -type f | sort
 

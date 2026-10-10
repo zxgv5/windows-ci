@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: '构建分支（alpha 的 Self-contained 因上游回归暂不可用）'
+        description: '构建分支'
         required: true
         default: 'v2.0'
         type: choice
@@ -39,7 +39,8 @@ jobs:
         working-directory: ahk_source
         run: msbuild AutoHotkeyx.sln /p:Configuration=Release /p:Platform=x64 /m /v:m /nologo
 
-      # alpha 分支的 SC 代码路径有上游回归（script.cpp 的模块化改造漏加
+      # alpha 分支的 SC 曾有上游回归（script.cpp 模块化改造漏加
+      # #ifndef AUTOHOTKEYSC 守卫）；不在 CI 层做分支豁免，构建失败即检验信号
       - name: Build Self-contained x64
         working-directory: ahk_source
         run: msbuild AutoHotkeyx.sln /p:Configuration=Self-contained /p:Platform=x64 /m /v:m /nologo
@@ -61,7 +62,16 @@ jobs:
             exit 1
           fi
           cp bin/AutoHotkey*64.exe "$DEST/"
-          cp bin_minimal/AutoHotkey*.bin "$DEST/" || true
+          # SC 运行时，按分支落在不同布局：
+          #   v2.0  → bin/"Unicode 64-bit.bin"
+          #   v1.1  → bin_minimal/AutoHotkeySC.bin
+          #   alpha → bin_minimal/（布局以修复后的实际输出为准）
+          cp bin/*.bin "$DEST/" || true
+          cp bin_minimal/*.bin "$DEST/" || true
+          if ! ls "$DEST"/*.bin >/dev/null 2>&1; then
+            echo "::error::No Self-contained .bin collected" >&2
+            exit 1
+          fi
           cp LICENSE "$DEST/" || true
           find "$DEST" -type f | sort
 
